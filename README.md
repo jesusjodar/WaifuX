@@ -46,9 +46,9 @@ Las pruebas del helper usan carpetas y preferencias temporales, un servidor WebD
 
 ## Empaquetar
 
-`bash scripts/package.sh` genera una compilación universal Release, audita el contenido y crea ZIP y DMG con firma ad hoc para uso local. Guarda cada ejecución en un directorio distinto dentro de `build/static-wallhaven`; no instala ni abre la app. `WAIFUX_SOURCE_APP` permite empaquetar un producto ya compilado, que se copia antes de firmarlo.
+`bash scripts/package.sh` genera una compilación universal Debug para uso local, audita el contenido y crea ZIP y DMG con firma ad hoc para uso local. Guarda cada ejecución en un directorio distinto dentro de `build/static-wallhaven`; no instala ni abre la app. `WAIFUX_SOURCE_APP` permite empaquetar un producto Debug ya compilado, que se copia antes de firmarlo. Los archivos identifican expresamente la configuración.
 
-Para distribución pública se necesita una identidad Developer ID válida, el perfil de aprovisionamiento del helper, notarización y una clave Sparkle propia del fork. La plantilla Homebrew requiere el hash de un ZIP real; no contiene acciones para registrar extensiones ni borrar datos. Los flujos de esta rama no publican releases automáticamente.
+Para distribución pública se necesita una identidad Developer ID válida, el perfil de aprovisionamiento del helper, notarización y una clave Sparkle propia del fork. Al configurar `WAIFUX_SIGN_IDENTITY` y `WAIFUX_HELPER_PROFILE`, el empaquetado utiliza Release y verifica su identidad. El helper Release rechaza clientes sin identidad de equipo: una firma ad hoc no permite utilizarlo. La plantilla Homebrew requiere el hash de un ZIP real; no contiene acciones para registrar extensiones ni borrar datos. Los flujos de esta rama no publican releases automáticamente.
 
 El feed del fork es `https://jesusjodar.github.io/WaifuX/appcast.xml`, inicialmente sin versiones. Las comprobaciones automáticas están desactivadas. `scripts/generate-appcast.py` exige configurar `SUPublicEDKey` y una firma Ed25519 antes de anunciar un archivo real. No reutilices las claves de otro proyecto.
 

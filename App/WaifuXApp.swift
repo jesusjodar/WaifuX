@@ -558,6 +558,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, @preconcur
 
     /// 触发 Sparkle 更新检查（供 Settings "检查更新" 按钮调用）
     func checkForUpdates() {
+        guard let updaterController else { return }
         if let settingsWindow = settingsWindowController?.window, settingsWindow.isVisible {
             shouldRestoreSettingsWindowAfterUpdateCheck = true
             settingsWindow.orderOut(nil)

@@ -60,7 +60,11 @@ if args.app:
     for bundle, executable in ((app, 'WaifuX'), (helper, 'WaifuXHelper')):
         info = plistlib.loads((bundle / 'Contents/Info.plist').read_bytes())
         assert not any(k.endswith('UsageDescription') or 'ScreenCapture' in k for k in info), bundle
+        assert info.get('WaifuXBuildConfiguration') in ('Debug', 'Release'), (bundle, 'build configuration marker')
         if args.signed:
+            signing = subprocess.run(['codesign', '-dv', '--verbose=4', str(bundle)], capture_output=True, text=True, check=True).stderr
+            if info['WaifuXBuildConfiguration'] == 'Release':
+                assert re.search(r'^TeamIdentifier=\S+$', signing, re.M) and 'TeamIdentifier=not set' not in signing, (bundle, 'Release helper requires an authenticated signing team')
             encoded = subprocess.check_output(['codesign', '-d', '--entitlements', ':-', str(bundle)], stderr=subprocess.DEVNULL)
             signed_permissions = plistlib.loads(encoded)
             assert all(signed_permissions.get(key) == value for key, value in permissions.items()), (bundle, 'retained entitlements')

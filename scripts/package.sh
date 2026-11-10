@@ -3,6 +3,12 @@
 set -euo pipefail
 repo_root="$(cd "$(dirname "$0")/.." && pwd)"
 pkg_arch="${WAIFUX_ARCH:-universal}"
+identity="${WAIFUX_SIGN_IDENTITY:--}"
+if [[ "$identity" == '-' ]]; then
+  configuration=Debug
+else
+  configuration=Release
+fi
 case "$pkg_arch" in
   arm64|x86_64) build_archs="$pkg_arch" ;;
   universal) build_archs="arm64 x86_64" ;;
@@ -17,18 +23,26 @@ if [[ -n "${WAIFUX_SOURCE_APP:-}" ]]; then
   source_app="$WAIFUX_SOURCE_APP"
 else
   xcodegen generate --spec "$repo_root/project.yml" --project "$repo_root"
-  xcodebuild -project "$repo_root/WaifuX.xcodeproj" -scheme WaifuX -configuration Release \
+  xcodebuild -project "$repo_root/WaifuX.xcodeproj" -scheme WaifuX -configuration "$configuration" \
     -derivedDataPath "$package_work/DerivedData" "ARCHS=$build_archs" ONLY_ACTIVE_ARCH=NO \
     CODE_SIGNING_ALLOWED=NO build > "$package_work/build.log" 2>&1 || {
       cp "$package_work/build.log" "$output_root/last-build-failure.log"; exit 1;
     }
-  source_app="$package_work/DerivedData/Build/Products/Release/WaifuX.app"
+  source_app="$package_work/DerivedData/Build/Products/$configuration/WaifuX.app"
 fi
+python3 - "$source_app" "$configuration" <<'PYCODE'
+from pathlib import Path
+import plistlib, sys
+app = Path(sys.argv[1])
+expected = sys.argv[2]
+for bundle in (app, app / 'Contents/Helpers/WaifuXHelper.app'):
+    info = plistlib.loads((bundle / 'Contents/Info.plist').read_bytes())
+    assert info.get('WaifuXBuildConfiguration') == expected, f'{bundle}: expected {expected}; a Release helper rejects ad-hoc clients'
+PYCODE
 python3 "$repo_root/scripts/verify-project-configuration.py" --app "$source_app" --architectures $build_archs
 mkdir -p "$package_work/image"
 ditto "$source_app" "$package_work/image/WaifuX.app"
 app="$package_work/image/WaifuX.app"
-identity="${WAIFUX_SIGN_IDENTITY:--}"
 sign_bundle() {
   if [[ "$identity" == '-' ]]; then
     codesign --force --sign - "$@"
@@ -58,13 +72,14 @@ fi
 ln -s /Applications "$package_work/image/Applications"
 version="$(tr -d '[:space:]' < "$repo_root/VERSION")"
 artifact="WaifuX-Wallhaven-$version-$pkg_arch"
+if [[ "$configuration" == Debug ]]; then artifact="$artifact-Debug"; fi
 # Unique output names prevent overwriting an existing package with a new build.
 release_dir="$(mktemp -d "$output_root/$artifact.XXXXXX")"
 ditto -c -k --sequesterRsrc --keepParent "$app" "$release_dir/$artifact.zip"
 hdiutil create -volname 'WaifuX Wallhaven' -srcfolder "$package_work/image" -format UDZO "$release_dir/$artifact.dmg"
 shasum -a 256 "$release_dir/$artifact.zip" "$release_dir/$artifact.dmg" > "$release_dir/SHA256SUMS"
 if [[ "$identity" == '-' ]]; then
-  echo 'Ad-hoc signed local build. Developer ID signing and notarization have not been performed.' > "$release_dir/SIGNING.txt"
+  echo 'Ad-hoc signed Debug development build. Release requires a valid team identity and helper provisioning; Developer ID signing and notarization have not been performed.' > "$release_dir/SIGNING.txt"
 else
   printf 'Signed with the configured identity. Notarization must be completed before public distribution.\n' > "$release_dir/SIGNING.txt"
 fi

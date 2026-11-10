@@ -22,4 +22,4 @@ Only the app and static helper are shipped. Do not reintroduce series playback/d
 
 ## Distribution
 
-Manual packaging creates local development artifacts. A public release additionally needs Developer ID signing, helper provisioning, notarization, matching Sparkle keys and hashes of the actual archives. Review the resulting feed and packages before publishing them.
+Manual packaging creates local Debug development artifacts. Release helpers require a valid signing team; ad-hoc Release packaging is rejected. A public release additionally needs Developer ID signing, helper provisioning, notarization, matching Sparkle keys and hashes of the actual archives. Review the resulting feed and packages before publishing them.

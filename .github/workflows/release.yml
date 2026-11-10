@@ -10,7 +10,7 @@ jobs:
       - uses: actions/checkout@v5
       - name: Install XcodeGen
         run: command -v xcodegen || brew install xcodegen
-      - name: Build, ad-hoc sign and audit universal package
+      - name: Build, ad-hoc sign and audit universal Debug package
         run: bash scripts/package.sh
       - uses: actions/upload-artifact@v4
         with:
