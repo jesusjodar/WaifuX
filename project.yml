@@ -190,6 +190,7 @@ targets:
     - path: DesignSystem/LiquidGlassDesignSystem.swift
     - path: DesignSystem/ThemeManager.swift
     - path: Services/StaticWallpaperRequestCoordinator.swift
+    - path: Models/StaticWallpaperRotationState.swift
     dependencies:
     - package: Kingfisher
     - package: Cache

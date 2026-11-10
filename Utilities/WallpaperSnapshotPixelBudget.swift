@@ -5,8 +5,6 @@ import Foundation
 enum WallpaperSnapshotPixelBudget {
     static let maximumPixelBytes = 32 * 1024 * 1024
     static let maximumDimension = 4096
-    // Reserve for a worst-case 16-byte decoded pixel, including common strides.
-    static let maximumVideoImageDimension = 1440
 
     struct Layout: Equatable, Sendable {
         let width: Int

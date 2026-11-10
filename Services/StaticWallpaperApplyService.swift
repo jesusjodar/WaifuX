@@ -76,14 +76,53 @@ enum StaticWallpaperApplyService {
       .allowClipping: true,
     ]
     DesktopWallpaperSyncManager.shared.captureOriginalSystemWallpaperIfNeeded(for: screens)
-    for screen in screens {
-      try Task.checkCancellation()
-      guard !isTerminating, coordinator.isCurrent(token),
-        let image = prepared[screen.wallpaperScreenIdentifier]
-      else { throw CancellationError() }
-      try NSWorkspace.shared.setDesktopImageURLForAllSpaces(image, for: screen, options: options)
-      DesktopWallpaperSyncManager.shared.registerWallpaperSet(
-        image, for: screen, options: options, sourceURL: imageURL)
+    let workspace = NSWorkspace.shared
+    let previous = screens.map { screen in
+      (
+        screen: screen, url: workspace.desktopImageURL(for: screen),
+        options: workspace.desktopImageOptions(for: screen) ?? [:],
+        registered: DesktopWallpaperSyncManager.shared.imageURL(for: screen)
+      )
+    }
+    var changed = Set<String>()
+    do {
+      for screen in screens {
+        try Task.checkCancellation()
+        guard !isTerminating, coordinator.isCurrent(token),
+          let image = prepared[screen.wallpaperScreenIdentifier]
+        else { throw CancellationError() }
+        try workspace.setDesktopImageURLForAllSpaces(image, for: screen, options: options)
+        changed.insert(screen.wallpaperScreenIdentifier)
+        DesktopWallpaperSyncManager.shared.registerWallpaperSet(
+          image, for: screen, options: options, sourceURL: imageURL)
+      }
+    } catch {
+      var rollbackErrors: [String] = []
+      for prior in previous where changed.contains(prior.screen.wallpaperScreenIdentifier) {
+        guard coordinator.request(token, for: prior.screen) != nil else { continue }
+        guard let url = prior.url else {
+          rollbackErrors.append(prior.screen.localizedName)
+          continue
+        }
+        do {
+          try workspace.setDesktopImageURLForAllSpaces(
+            url, for: prior.screen, options: prior.options)
+          if let registered = prior.registered, registered.standardizedFileURL == url.standardizedFileURL {
+            DesktopWallpaperSyncManager.shared.registerWallpaperSet(
+              registered, for: prior.screen, options: prior.options)
+          } else {
+            DesktopWallpaperSyncManager.shared.clearRegistration(for: prior.screen)
+          }
+        } catch {
+          rollbackErrors.append(prior.screen.localizedName)
+        }
+      }
+      if !rollbackErrors.isEmpty {
+        AppLogger.error(
+          .wallpaper, "Static wallpaper rollback incomplete",
+          metadata: ["screens": rollbackErrors.joined(separator: ", ")])
+      }
+      throw error
     }
   }
 

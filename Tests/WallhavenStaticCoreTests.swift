@@ -15,6 +15,47 @@ enum WallhavenStaticCoreTests {
             }
             print("PASS: \(wallpapers.count) live API records and thumbnail URLs satisfy Wallhaven policy")
         }
+        let bindings = WallpaperScreenIdentity.schedulerBindings(
+            fingerprints: ["1": "cg:1:10:serialA:1920x1080", "2": "cg:1:20:serialB:1920x1080"],
+            screens: [("1", "cg:1:20:serialB:2560x1440"), ("2", "cg:1:10:serialA:2560x1440")], allowRelativeRank: true)
+        precondition(bindings == ["1": "2", "2": "1"])
+        let twins = WallpaperScreenIdentity.schedulerBindings(
+            fingerprints: ["1": "cg:1:10:noserial:Display:1920x1080:position:0x0", "2": "cg:1:10:noserial:Display:1920x1080:position:1920x0"],
+            screens: [("1", "cg:1:10:noserial:Pantalla:2560x1440:position:0x0"), ("2", "cg:1:10:noserial:Pantalla:2560x1440:position:-2560x0")], allowRelativeRank: true)
+        precondition(twins == ["1": "2", "2": "1"])
+        let parked = WallpaperScreenIdentity.schedulerRelocations(keys: ["1", "2"], bindings: ["1": "2"], liveIDs: ["2"])
+        precondition(parked["1"] == "2" && parked["2"] != "2")
+        let configData = Data(#"{"isEnabled":true,"intervalMinutes":30,"order":"sequential","displayConfigs":{"valid":{"isEnabled":true,"intervalMinutes":15,"order":"random","includeWallpapers":true,"includeMedia":true,"folderIDs":["chosen"],"displayFingerprint":"physical-one"},"retired":{"isEnabled":true,"intervalMinutes":-1,"order":"random"},"videoOnly":{"isEnabled":true,"intervalMinutes":5,"order":"random","includeWallpapers":false},"corrupt":null},"isGlobalDisplaySyncEnabled":true,"globalDisplayConfig":{"isEnabled":true,"intervalMinutes":-2,"order":"random"}}"#.utf8)
+        let migrated = try JSONDecoder().decode(SchedulerConfig.self, from: configData)
+        precondition(migrated.isEnabled && migrated.intervalMinutes == 30 && migrated.order == .sequential)
+        precondition(migrated.displayConfigs.count == 3)
+        precondition(migrated.displayConfigs["valid"]?.folderIDs == ["chosen"])
+        precondition(migrated.displayConfigs["valid"]?.displayFingerprint == "physical-one")
+        precondition(migrated.displayConfigs["retired"]?.isEnabled == false)
+        precondition(migrated.displayConfigs["videoOnly"]?.isEnabled == false)
+        precondition(migrated.globalDisplayConfig.isOnUnlockMode && migrated.globalDisplayConfig.isEnabled)
+        precondition(!migrated.storedDisplayConfig(for: "new-monitor").isEnabled)
+        let configRoundTrip = try JSONDecoder().decode(SchedulerConfig.self, from: JSONEncoder().encode(migrated))
+        precondition(configRoundTrip == migrated)
+        let ids = ["aa0001", "aa0002", "aa0003"]
+        var rotation = StaticWallpaperRotationState()
+        var cycle: [String] = []
+        for _ in 0..<3 {
+            let next = rotation.nextID(in: ids, order: .random)!
+            cycle.append(next)
+            rotation.recordSelection(next, candidates: Set(ids))
+        }
+        precondition(Set(cycle).count == 3)
+        precondition(rotation.nextID(in: ids, order: .random) != rotation.currentID)
+        let currentIndex = ids.firstIndex(of: rotation.currentID!)!
+        precondition(rotation.nextID(in: ids, order: .sequential) == ids[(currentIndex + 1) % ids.count])
+        precondition(rotation.nextID(in: [], order: .random) == nil)
+        precondition(rotation.nextID(in: ["replacement"], order: .sequential) == "replacement")
+        let previous = rotation.previousID(in: Set(ids))!
+        rotation.recordPrevious(previous)
+        precondition(rotation.currentID == previous)
+        let stateRoundTrip = try JSONDecoder().decode(StaticWallpaperRotationState.self, from: JSONEncoder().encode(rotation))
+        precondition(stateRoundTrip == rotation)
         enum Kind: String, Decodable { case wallpaper }
         struct Record: Decodable {
             let id: String
@@ -99,6 +140,6 @@ enum WallhavenStaticCoreTests {
         precondition(WallpaperSnapshotPixelBudget.layout(width: .nan, height: 100) == nil)
         precondition(WallpaperSnapshotPixelBudget.layout(width: 0, height: 100) == nil)
         precondition(!WallpaperSnapshotPixelBudget.acceptsDecodedImage(width: 4096, height: 4096, bytesPerRow: Int.max))
-        print("PASS: mixed legacy records, Wallhaven provenance, malicious URLs, static image formats and decode memory bounds")
+        print("PASS: static rotation and config migration, mixed legacy records, Wallhaven provenance, malicious URLs and decode memory bounds")
     }
 }

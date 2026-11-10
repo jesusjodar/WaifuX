@@ -105,27 +105,14 @@ final class CropAdjustOverlayController {
         self.escapeMonitor = nil
     }
 
-    /// 按当前屏壁纸类型取真实尺寸，供 overlay 预览 crop 计算。
-    /// 视频→VideoWallpaperManager 缓存的 naturalSize；wgpu→Bridge 的 canvas 尺寸文件；静态图→OverlayManager 缓存；取不到返回 nil。
+    /// Static crop previews use the verified original image dimensions.
     static func wallpaperSize(for screen: NSScreen) -> CGSize? {
-        // 1) 视频壁纸：取 VideoWallpaperManager 缓存的 naturalSize
-        if let size = VideoWallpaperManager.shared.videoSize(for: screen) {
-            return size
-        }
-        // Web 调节的是整个 screen-sized HTML 页面，不读取内部 video/canvas 尺寸。
-        if WallpaperEngineXBridge.shared.isWebWallpaperOn(screen: screen) {
-            return screen.frame.size
-        }
-        // 2) wgpu 动态壁纸：取 Bridge 的 canvas 尺寸文件
-        if let size = WallpaperEngineXBridge.shared.canvasSize(for: screen) {
-            return size
-        }
-        // 3) 静态图片：取 StaticImageWallpaperOverlayManager 缓存的图片像素尺寸
-        if let size = StaticImageWallpaperOverlayManager.shared.imageSize(for: screen) {
-            return size
-        }
-        return nil
+        guard let current = CurrentWallpaperService.shared.activeURL(for: screen.wallpaperScreenIdentifier) else { return nil }
+        let original = DesktopWallpaperSyncManager.shared.originalSourceURL(for: current)
+        guard let record = WallpaperLibraryService.shared.downloadRecord(forLocalFilePath: original.path) else { return nil }
+        return CGSize(width: record.wallpaper.dimensionX, height: record.wallpaper.dimensionY)
     }
+
 }
 
 /// overlay 窗口：ESC 退出。

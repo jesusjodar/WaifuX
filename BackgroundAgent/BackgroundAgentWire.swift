@@ -4,7 +4,7 @@ import MachO
 enum BackgroundAgentWire {
     static let bundleIdentifier = "com.waifux.app.helper"
     static let machServiceName = "com.waifux.app.helper.control"
-    static let protocolVersion = 2
+    static let protocolVersion = 3
     static let plistName = "com.waifux.app.helper.plist"
     /// 备用注册：与 `plistName` 内容相同、只换 launchd Label。
     ///

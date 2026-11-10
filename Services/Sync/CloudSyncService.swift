@@ -228,24 +228,13 @@ final class CloudSyncService: ObservableObject {
 
     // MARK: - 公共同步子步骤
 
-    /// 扫描本地三个下载目录
+    /// Scan the retained static wallpaper directory.
     private func scanLocalFiles(downloadMgr: DownloadPathManager) async throws -> [String: CloudSyncManifest.CloudSyncManifestEntry] {
         let localWallpapers = try await fileEngine.scanLocalDirectory(
             basePath: "Wallpapers",
             directoryURL: downloadMgr.wallpapersFolderURL
         )
-        let localMedia = try await fileEngine.scanLocalDirectory(
-            basePath: "Media",
-            directoryURL: downloadMgr.mediaFolderURL
-        )
-        let localSceneBakes = try await fileEngine.scanLocalDirectory(
-            basePath: "SceneBakes",
-            directoryURL: downloadMgr.sceneBakesFolderURL
-        )
-        var localManifest = localWallpapers
-        localManifest.merge(localMedia) { current, _ in current }
-        localManifest.merge(localSceneBakes) { current, _ in current }
-        return localManifest
+        return localWallpapers
     }
 
     /// 上传/下载文件循环
@@ -472,11 +461,6 @@ final class CloudSyncService: ObservableObject {
     #if WAIFUX_HELPER
     private func prepareLocalState() {
         config.reloadFromPreferences()
-        // These UI-oriented stores are restored on demand. Exporting freshly
-        // initialized empty instances would erase persisted anime/progress data.
-        AnimeFavoriteStore.shared.restoreSavedData()
-        AnimeProgressStore.shared.restoreSavedData()
-        PlaybackProgressCache.shared.restoreSavedData()
         LibraryGridOrderStore.shared.reloadFromPreferences()
     }
     #else

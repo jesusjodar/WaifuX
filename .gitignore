@@ -134,3 +134,5 @@ Tools/MobilePush/__pycache__/
 !/Tests/
 /Tests/*
 !/Tests/WallhavenStaticCoreTests.swift
+
+!/Tests/WallhavenDownloadQueueTests.swift

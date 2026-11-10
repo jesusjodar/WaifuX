@@ -211,6 +211,10 @@ final class DesktopWallpaperSyncManager {
     }
 
     /// 返回指定屏幕最后通过 App 设置的静态壁纸 URL（无记录时返回 nil）
+    func originalSourceURL(for imageURL: URL) -> URL {
+        sourcePathByImagePath[imageURL.standardizedFileURL.path].map { URL(fileURLWithPath: $0) } ?? imageURL
+    }
+
     func imageURL(for screen: NSScreen) -> URL? {
         let screenID = screen.wallpaperScreenIdentifier
         let fingerprint = screen.wallpaperScreenFingerprint

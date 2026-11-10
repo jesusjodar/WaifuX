@@ -20,8 +20,6 @@ enum BackgroundRuntimeRole {
 
     static func permitsOperation(_ operation: String) -> Bool {
         guard !allowsDesktopRendering else { return true }
-        if operation == "dsh.set.wait" || operation == "dsh.clear.wait" { return false }
-        return !["video.", "engine.", "wallpaper.", "desktop.", "lock.", "widget.",
-                 "clock.", "arc.", "bake.", "scene.", "overlay.", "saver."].contains { operation.hasPrefix($0) }
+        return !["wallpaper.", "desktop."].contains { operation.hasPrefix($0) }
     }
 }

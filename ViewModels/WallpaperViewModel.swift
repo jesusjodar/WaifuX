@@ -1139,6 +1139,7 @@ class WallpaperViewModel: ObservableObject {
         folderID: String?,
         taskID: String
     ) async throws {
+        let wallpaper = try await canonicalWallpaperForDownload(wallpaper)
         guard await downloadPathManager.ensureDirectoryStructure() else {
             throw DownloadError.permissionDenied
         }
@@ -1180,14 +1181,6 @@ class WallpaperViewModel: ObservableObject {
             return localURL
         }
 
-        if wallpaper.id.hasPrefix("local_"),
-           let localURL = wallpaper.fullImageURL,
-           localURL.isFileURL,
-           FileManager.default.fileExists(atPath: localURL.path) {
-            wallpaperLibrary.recordDownload(wallpaper, fileURL: localURL)
-            return localURL
-        }
-
         try await downloadWallpaper(wallpaper)
         guard let localURL = wallpaperLibrary.localFileURLIfAvailable(for: wallpaper) else {
             throw DownloadError.writeFailed(
@@ -1199,6 +1192,19 @@ class WallpaperViewModel: ObservableObject {
             )
         }
         return localURL
+    }
+
+    private func canonicalWallpaperForDownload(_ wallpaper: Wallpaper) async throws -> Wallpaper {
+        guard WallhavenContentPolicy.isWallpaperRecord(id: wallpaper.id, detailURL: wallpaper.url, imagePath: wallpaper.path) else {
+            throw NetworkError.invalidResponse
+        }
+        if WallhavenContentPolicy.imageURL(wallpaper.path)?.host == "w.wallhaven.cc" { return wallpaper }
+        await loadAPIKeyIfNeeded()
+        let detail = try await resolveWallhavenWallpaperByID(wallpaper.id)
+        guard detail.id == wallpaper.id,
+              WallhavenContentPolicy.isWallpaperRecord(id: detail.id, detailURL: detail.url, imagePath: detail.path),
+              WallhavenContentPolicy.imageURL(detail.path)?.host == "w.wallhaven.cc" else { throw NetworkError.invalidResponse }
+        return detail
     }
 
     func downloadWallpaperData(_ wallpaper: Wallpaper, taskID: String? = nil) async throws -> Data {

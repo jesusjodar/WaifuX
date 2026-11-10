@@ -32,6 +32,22 @@ enum LegacyRecordReader {
         return Result(records: accepted, rejectedCount: elements.totalCount - accepted.count)
     }
 
+    private struct Key: CodingKey {
+        let stringValue: String
+        var intValue: Int? { nil }
+        init?(stringValue: String) { self.stringValue = stringValue }
+        init?(intValue: Int) { return nil }
+    }
+
+    static func readDictionary<Record: Decodable>(_ type: Record.Type, from decoder: Decoder) throws -> [String: Record] {
+        let container = try decoder.container(keyedBy: Key.self)
+        var records: [String: Record] = [:]
+        for key in container.allKeys {
+            if let record = try? container.decode(type, forKey: key) { records[key.stringValue] = record }
+        }
+        return records
+    }
+
     private struct Elements<Record: Decodable>: Decodable {
         var records: [Record] = []
         var totalCount = 0
