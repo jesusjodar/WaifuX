@@ -199,7 +199,15 @@ final class AppLogger: @unchecked Sendable {
 
     /// 文件路径
     private lazy var logFileURL: URL? = {
-        guard let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first else { return nil }
+        let appSupport: URL
+        if BackgroundRuntimeRole.isIsolatedTest {
+            appSupport = ProcessInfo.processInfo.environment["WAIFUX_HELPER_TEST_ROOT"]
+                .map { URL(fileURLWithPath: $0) }
+                ?? FileManager.default.temporaryDirectory.appendingPathComponent("WaifuX-Isolated-\(getpid())")
+        } else {
+            guard let directory = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first else { return nil }
+            appSupport = directory
+        }
         let waifuXDir = appSupport.appendingPathComponent("WaifuX", isDirectory: true)
         try? FileManager.default.createDirectory(at: waifuXDir, withIntermediateDirectories: true)
         return waifuXDir.appendingPathComponent("waifux.log")

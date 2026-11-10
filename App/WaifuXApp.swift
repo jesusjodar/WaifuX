@@ -488,6 +488,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, @preconcur
 
         // 设置标准菜单栏（包含 Edit 菜单，使 TextField 支持复制粘贴）
         setupMainMenu()
+        NotificationCenter.default.addObserver(forName: .appLanguageDidChange, object: nil, queue: .main) { [weak self] _ in
+            Task { @MainActor in self?.setupMainMenu() }
+        }
 
         // 捕获 macOS 布局循环异常（NSHostingView + NSCollectionView 混合布局的已知问题）
         // _postWindowNeedsLayout 在 _layoutViewTree 期间被触发时会抛出此异常
@@ -496,11 +499,15 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, @preconcur
         // 初始化 Sparkle 自动更新（检测 + 内置弹窗 + 自动安装）
         // 拆架构分发：appcast 每个版本有 arm64 / x86_64 两个 item（sparkle:channel），
         // 这里按当前包架构声明 allowedChannels，Sparkle 只会选中对应架构的更新包。
-        updaterController = SPUStandardUpdaterController(
-            startingUpdater: true,
-            updaterDelegate: self,
-            userDriverDelegate: self
-        )
+        // Sparkle owns its own standard preference domain. Isolated startup
+        // probes must not read or mutate the installed updater's state.
+        if !BackgroundRuntimeRole.isIsolatedTest {
+            updaterController = SPUStandardUpdaterController(
+                startingUpdater: true,
+                updaterDelegate: self,
+                userDriverDelegate: self
+            )
+        }
 
         // 状态栏由 Helper 持有；UI 只接收明确的窗口/操作请求。
         WaifuXUIActions.handler = { [weak self] action in
@@ -878,7 +885,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, @preconcur
             window?.contentView = hostingView
 
             // 恢复保存的窗口尺寸
-            window?.setFrameAutosaveName(WindowAutosaveName.mainWindow)
+            if !BackgroundRuntimeRole.isIsolatedTest {
+                window?.setFrameAutosaveName(WindowAutosaveName.mainWindow)
+            }
             if !hasSavedWindowFrame() { window?.center() }
 
             window?.delegate = self
@@ -1055,13 +1064,13 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, @preconcur
         // App 菜单
         let appMenuItem = NSMenuItem()
         let appMenu = NSMenu(title: "WaifuX")
-        appMenu.addItem(NSMenuItem(title: "About WaifuX", action: #selector(NSApplication.orderFrontStandardAboutPanel(_:)), keyEquivalent: ""))
+        appMenu.addItem(NSMenuItem(title: t("menu.about"), action: #selector(NSApplication.orderFrontStandardAboutPanel(_:)), keyEquivalent: ""))
         let settingsItem = NSMenuItem(title: t("settings") + "…", action: #selector(showSettingsWindow(_:)), keyEquivalent: ",")
         settingsItem.target = self
         appMenu.addItem(settingsItem)
         appMenu.addItem(NSMenuItem.separator())
-        appMenu.addItem(withTitle: "Hide WaifuX", action: #selector(NSApplication.hide(_:)), keyEquivalent: "h")
-        let quitItem = NSMenuItem(title: "Quit WaifuX", action: #selector(quitApplicationFromMainMenu(_:)), keyEquivalent: "q")
+        appMenu.addItem(withTitle: t("menu.hide"), action: #selector(NSApplication.hide(_:)), keyEquivalent: "h")
+        let quitItem = NSMenuItem(title: t("menu.quit"), action: #selector(quitApplicationFromMainMenu(_:)), keyEquivalent: "q")
         quitItem.target = self
         appMenu.addItem(quitItem)
         appMenuItem.submenu = appMenu
@@ -1069,22 +1078,22 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, @preconcur
 
         // Edit 菜单（使 TextField 支持 Cmd+C / Cmd+V / Cmd+A 等）
         let editMenuItem = NSMenuItem()
-        let editMenu = NSMenu(title: "Edit")
-        editMenu.addItem(withTitle: "Undo", action: Selector(("undo:")), keyEquivalent: "z")
-        editMenu.addItem(withTitle: "Redo", action: Selector(("redo:")), keyEquivalent: "Z")
+        let editMenu = NSMenu(title: t("menu.edit"))
+        editMenu.addItem(withTitle: t("menu.undo"), action: Selector(("undo:")), keyEquivalent: "z")
+        editMenu.addItem(withTitle: t("menu.redo"), action: Selector(("redo:")), keyEquivalent: "Z")
         editMenu.addItem(NSMenuItem.separator())
-        editMenu.addItem(withTitle: "Cut", action: #selector(NSText.cut(_:)), keyEquivalent: "x")
-        editMenu.addItem(withTitle: "Copy", action: #selector(NSText.copy(_:)), keyEquivalent: "c")
-        editMenu.addItem(withTitle: "Paste", action: #selector(NSText.paste(_:)), keyEquivalent: "v")
-        editMenu.addItem(withTitle: "Select All", action: #selector(NSText.selectAll(_:)), keyEquivalent: "a")
+        editMenu.addItem(withTitle: t("menu.cut"), action: #selector(NSText.cut(_:)), keyEquivalent: "x")
+        editMenu.addItem(withTitle: t("menu.copy"), action: #selector(NSText.copy(_:)), keyEquivalent: "c")
+        editMenu.addItem(withTitle: t("menu.paste"), action: #selector(NSText.paste(_:)), keyEquivalent: "v")
+        editMenu.addItem(withTitle: t("menu.selectAll"), action: #selector(NSText.selectAll(_:)), keyEquivalent: "a")
         editMenuItem.submenu = editMenu
         mainMenu.addItem(editMenuItem)
 
         // Window 菜单
         let windowMenuItem = NSMenuItem()
-        let windowMenu = NSMenu(title: "Window")
-        windowMenu.addItem(withTitle: "Minimize", action: #selector(NSWindow.performMiniaturize(_:)), keyEquivalent: "m")
-        windowMenu.addItem(withTitle: "Close", action: #selector(NSWindow.performClose(_:)), keyEquivalent: "w")
+        let windowMenu = NSMenu(title: t("menu.window"))
+        windowMenu.addItem(withTitle: t("menu.minimize"), action: #selector(NSWindow.performMiniaturize(_:)), keyEquivalent: "m")
+        windowMenu.addItem(withTitle: t("menu.close"), action: #selector(NSWindow.performClose(_:)), keyEquivalent: "w")
         windowMenuItem.submenu = windowMenu
         mainMenu.addItem(windowMenuItem)
 

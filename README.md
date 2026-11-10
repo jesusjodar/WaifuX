@@ -42,6 +42,14 @@ python3 scripts/test-wallhaven-helper-integration.py \
   build/validation/Build/Products/Debug/WaifuXHelper.app/Contents/MacOS/WaifuXHelper
 ```
 
+Para revisar el arranque normal de la interfaz sin registrar el servicio instalado:
+
+```sh
+python3 scripts/test-wallhaven-ui-preview.py build/validation/Build/Products/Debug/WaifuX.app --full-startup
+```
+
+La prueba utiliza un servicio XPC temporal con la comprobación real de identidad del ejecutable. Aísla preferencias, cachés, registros y llavero de prueba; omite el actualizador y el guardado de la geometría de ventanas, y bloquea las operaciones del escritorio. Cierra la ventana o interrumpe el lanzador para retirar el servicio temporal.
+
 Las pruebas del helper usan carpetas y preferencias temporales, un servidor WebDAV de bucle local y salida de escritorio deshabilitada. No registran el servicio instalado ni cambian el fondo personal. La búsqueda en directo, las credenciales, los gestos, varias pantallas, Spaces, reposo y reconexión requieren validación adicional en la app.
 
 ## Empaquetar

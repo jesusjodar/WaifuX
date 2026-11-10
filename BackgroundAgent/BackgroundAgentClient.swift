@@ -171,6 +171,14 @@ final class BackgroundAgentClient: ObservableObject {
 
     func start() {
         guard bootstrapTask == nil, !isQuittingApplication else { return }
+        #if DEBUG
+        if BackgroundRuntimeRole.isIsolatedTest,
+           ProcessInfo.processInfo.environment["WAIFUX_UI_FULL_STARTUP"] == "1" {
+            do { try prepareIsolatedUIStartup() }
+            catch { lastError = error.localizedDescription }
+            return
+        }
+        #endif
         isClosing = false
         requiresApproval = false
         isBootstrapping = true
@@ -499,6 +507,11 @@ final class BackgroundAgentClient: ObservableObject {
     /// Exercises the real command queue, subscription and exit drain without
     /// registering a production login item or importing the user's preferences.
     func startIsolatedUIExitProbe() async throws {
+        try prepareIsolatedUIStartup()
+        try await bootstrapTask?.value
+    }
+
+    private func prepareIsolatedUIStartup() throws {
         let environment = ProcessInfo.processInfo.environment
         guard BackgroundRuntimeRole.isIsolatedTest,
               let service = environment["WAIFUX_HELPER_TEST_SERVICE"],
@@ -524,7 +537,6 @@ final class BackgroundAgentClient: ObservableObject {
             isConnected = true
             installPreferenceMutationHandler()
         }
-        try await bootstrapTask?.value
     }
 
     func pauseIsolatedHelperForExitProbe() async throws {

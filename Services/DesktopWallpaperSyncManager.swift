@@ -303,6 +303,7 @@ final class DesktopWallpaperSyncManager {
 
     /// 应用变为活跃时的备用同步入口（处理 activeSpaceDidChangeNotification 丢失的情况）
     func syncOnAppActivation() {
+        guard BackgroundRuntimeRole.allowsDesktopRendering else { return }
         if BackgroundRuntimeRole.isRemoteUI { BackgroundRuntimeBridge.send("desktop.activation"); return }
         let screenCount = NSScreen.screens.count
         if screenCount <= 1, !requiresActivationRecoverySync {
