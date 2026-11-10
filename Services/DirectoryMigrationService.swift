@@ -329,12 +329,6 @@ final class DirectoryMigrationService {
         guard oldPath != newPath else { return }
 
         var needsRepair = false
-        for record in MediaLibraryService.shared.downloadRecords {
-            if record.localFilePath.hasPrefix(oldPath) { needsRepair = true; break }
-            if record.item.pageURL.path.hasPrefix(oldPath) { needsRepair = true; break }
-            if let art = record.sceneBakeArtifact, art.videoPath.hasPrefix(oldPath) { needsRepair = true; break }
-            if let el = record.sceneBakeEligibility, el.contentRootPath.hasPrefix(oldPath) { needsRepair = true; break }
-        }
         if !needsRepair {
             for record in WallpaperLibraryService.shared.downloadRecords {
                 if record.localFilePath.hasPrefix(oldPath) { needsRepair = true; break }
@@ -344,9 +338,6 @@ final class DirectoryMigrationService {
             }
         }
         if !needsRepair {
-            for record in MediaLibraryService.shared.favoriteRecords {
-                if record.item.pageURL.path.hasPrefix(oldPath) { needsRepair = true; break }
-            }
         }
         if !needsRepair {
             for record in WallpaperLibraryService.shared.favoriteRecords {
@@ -359,12 +350,7 @@ final class DirectoryMigrationService {
         guard needsRepair else { return }
 
         print("[DirectoryMigrationService] Repairing orphaned paths: \(oldPath) -> \(newPath)")
-        MediaLibraryService.shared.bulkUpdateDownloadPaths(oldPrefix: oldPath, newPrefix: newPath)
         WallpaperLibraryService.shared.bulkUpdateDownloadPaths(oldPrefix: oldPath, newPrefix: newPath)
-        VideoWallpaperManager.shared.bulkUpdatePaths(oldPrefix: oldPath, newPrefix: newPath)
-        WallpaperEngineXBridge.shared.bulkUpdatePaths(oldPrefix: oldPath, newPrefix: newPath)
-        await UserLibrary.shared.bulkUpdatePaths(oldPrefix: oldPath, newPrefix: newPath)
-        VideoThumbnailCache.shared.migrateCacheKeys(fromOldPrefix: oldPath, toNewPrefix: newPath)
         await PortraitBlurFillWallpaperService.shared.rebaseArtifacts(
             from: defaultRoot,
             to: currentRoot,
@@ -388,7 +374,7 @@ final class DirectoryMigrationService {
         var orphanedMembershipAborted: Bool = false
     }
 
-    /// 修复已有下载记录的断裂路径，并显式扫描受管目录补建未知文件的记录。
+    /// Repair paths for existing verified Wallhaven download records.
     func repairBrokenRecords() async -> RepairResult {
         if BackgroundRuntimeRole.isRemoteUI {
             return (try? await BackgroundRuntimeBridge.requestCodable("directory.repair.wait", arguments: Data(), resultKey: "result", as: RepairResult.self)) ?? RepairResult()
@@ -402,33 +388,6 @@ final class DirectoryMigrationService {
             .first!.appendingPathComponent("WaifuX").path
         let candidateRoots = Array(Set([currentRoot, defaultRoot])).filter { !$0.isEmpty }
 
-        // ── 修复 MediaLibraryService ──
-        for record in MediaLibraryService.shared.downloadRecords {
-            guard record.isActive else { continue }
-            let filePath = record.localFilePath
-
-            if fm.fileExists(atPath: filePath) {
-                result.healthyCount += 1
-            } else if let sourcePath = findFileInCandidateRoots(
-                originalPath: filePath, candidateRoots: candidateRoots, fm: fm
-            ) {
-                let finalPath = migrateFileToCurrentRoot(
-                    sourcePath: sourcePath, currentRoot: currentRoot, fm: fm
-                ) ?? sourcePath
-                MediaLibraryService.shared.repairDownloadPath(itemID: record.item.id, newPath: finalPath)
-                if finalPath != sourcePath {
-                    result.migratedCount += 1
-                } else {
-                    result.repairedCount += 1
-                }
-                print("[Repair] Media repaired: \(filePath) -> \(finalPath)")
-            } else {
-                MediaLibraryService.shared.deactivateDownloadRecord(itemID: record.item.id)
-                result.removedCount += 1
-                print("[Repair] Media not found, deactivated: \(filePath)")
-            }
-        }
-        MediaLibraryService.shared.persistDownloads()
 
         // ── 修复 WallpaperLibraryService ──
         for record in WallpaperLibraryService.shared.downloadRecords {
@@ -473,15 +432,11 @@ final class DirectoryMigrationService {
                     validFavoriteFolderIDs: valid.wallpaperFavorites,
                     validDownloadFolderIDs: valid.wallpaperDownloads
                 )
-                let mediaCleared = MediaLibraryService.shared.clearOrphanFolderMemberships(
-                    validFavoriteFolderIDs: valid.mediaFavorites,
-                    validDownloadFolderIDs: valid.mediaDownloads
-                )
-                if wallpaperCleared < 0 || mediaCleared < 0 {
+                if wallpaperCleared < 0 {
                     result.orphanedMembershipAborted = true
                     print("[Repair] Orphan membership repair aborted: folder definitions not loaded")
                 } else {
-                    result.orphanedMembershipCount = max(wallpaperCleared, 0) + max(mediaCleared, 0)
+                    result.orphanedMembershipCount = max(wallpaperCleared, 0)
                     print("[Repair] Cleared \(result.orphanedMembershipCount) orphaned folder memberships")
                 }
             }
@@ -490,10 +445,8 @@ final class DirectoryMigrationService {
             print("[Repair] Folder store not restored yet; skipping orphan membership repair")
         }
 
-        // 所有内容现在都应经由软件导入；这一步只在用户主动修复时运行，
-        // 用于恢复旧版本、缓存损坏或迁移中断后遗留的未索引文件。
-        let reindexResult = await LocalWallpaperScanner.shared.rebuildManagedLibraryIndex()
-        result.indexedCount = reindexResult.totalIndexed
+        // Repair registered Wallhaven downloads only. Unknown files and retired
+        // providers are preserved on disk and never imported by directory scans.
 
         print(
             "[Repair] Done: indexed=\(result.indexedCount), "
@@ -548,12 +501,7 @@ final class DirectoryMigrationService {
     private func updateDownloadRecordPaths(from oldRoot: URL, to newRoot: URL) async {
         let oldPath = oldRoot.path
         let newPath = newRoot.path
-        MediaLibraryService.shared.bulkUpdateDownloadPaths(oldPrefix: oldPath, newPrefix: newPath)
         WallpaperLibraryService.shared.bulkUpdateDownloadPaths(oldPrefix: oldPath, newPrefix: newPath)
-        VideoWallpaperManager.shared.bulkUpdatePaths(oldPrefix: oldPath, newPrefix: newPath)
-        WallpaperEngineXBridge.shared.bulkUpdatePaths(oldPrefix: oldPath, newPrefix: newPath)
-        await UserLibrary.shared.bulkUpdatePaths(oldPrefix: oldPath, newPrefix: newPath)
-        VideoThumbnailCache.shared.migrateCacheKeys(fromOldPrefix: oldPath, toNewPrefix: newPath)
         await PortraitBlurFillWallpaperService.shared.rebaseArtifacts(
             from: URL(fileURLWithPath: oldPath),
             to: URL(fileURLWithPath: newPath),
