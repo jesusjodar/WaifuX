@@ -11,10 +11,7 @@ struct MenuBarQuickSwitcherView: View {
     @ObservedObject var viewModel: MenuBarQuickSwitcherViewModel
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
-    @State private var readyVideoURL: URL?
     /// hero 视频是否已「武装」：停留够久才真正加载视频预览（见 body 里的 .task）。
-    @State private var videoPreviewArmed = false
-    @State private var armedVideoTaskID: String?
     private static let videoPreviewArmDelay = Duration.milliseconds(450)
 
     // Panel: previous height kept; width bumped slightly for breathing room.
@@ -58,9 +55,7 @@ struct MenuBarQuickSwitcherView: View {
     @State private var volumeValue: Double = 1.0
     @State private var rateValue: Double = 1.0
 
-    private var videoTaskID: String {
-        "\(viewModel.isPreviewActive)|\(viewModel.activationGeneration)|\(viewModel.selectedItem?.id ?? "")|\(viewModel.selectedItem?.videoPreviewURL?.absoluteString ?? "")"
-    }
+
 
     private var hasAnyExpandedOverlay: Bool { isVolumeExpanded || isRateExpanded }
 
@@ -120,28 +115,13 @@ struct MenuBarQuickSwitcherView: View {
         .onAppear {
             refreshPlaybackControls()
         }
-        .task(id: videoTaskID) {
-            // 异步解析出视频 URL 后，候选 id 不变也要重新武装，延迟与动画保持原样。
-            // hero 视频延迟武装：连点缩略图时不要每个都起一个播放器 —— 外置盘原片
-            // 解码是弹窗里最贵的一步（CPU + IO + 一路 AVPlayer 内存）。停留超过
-            // 这个时间才真正加载视频预览；快速划过时只显示静帧。
-            videoPreviewArmed = false
-            armedVideoTaskID = nil
-            readyVideoURL = nil
-            guard viewModel.isPreviewActive, viewModel.selectedItem?.videoPreviewURL != nil else { return }
-            let request = videoTaskID
-            try? await Task.sleep(for: Self.videoPreviewArmDelay)
-            guard !Task.isCancelled, viewModel.isPreviewActive, videoTaskID == request else { return }
-            armedVideoTaskID = request
-            videoPreviewArmed = true
-        }
+
         .onChange(of: viewModel.isPreviewActive) { _, presented in
             isVolumeExpanded = false
             isRateExpanded = false
             if presented { refreshPlaybackControls() }
         }
         .onChange(of: viewModel.selectedItem?.videoPreviewURL) { _, _ in
-            readyVideoURL = nil
         }
     }
 
@@ -155,29 +135,6 @@ struct MenuBarQuickSwitcherView: View {
                         QuickSwitcherImage(url: selected.thumbnailURL, fallbackSymbol: "photo", isActive: viewModel.isPresented)
                             .id(selected.id + (selected.thumbnailURL?.absoluteString ?? "") + "#\(viewModel.coverRevision(for: selected.id))")
                             .transition(.opacity)
-                    }
-                    .overlay {
-                        if viewModel.isPreviewActive, videoPreviewArmed, armedVideoTaskID == videoTaskID,
-                           let videoURL = selected.videoPreviewURL {
-                            LoopingVideoBackgroundView(
-                                url: videoURL,
-                                isMuted: true,
-                                contentMode: .fill,
-                                // Outer SwiftUI clip owns the corner; avoid double-radius mismatch.
-                                cornerRadius: 0,
-                                isActive: viewModel.isPreviewActive,
-                                activity: viewModel.playbackActivity,
-                                onReady: { @MainActor in
-                                    guard viewModel.isPreviewActive, viewModel.selectedItem?.videoPreviewURL == videoURL else { return }
-                                    withAnimation(crossfadeAnimation) {
-                                        readyVideoURL = videoURL
-                                    }
-                                }
-                            )
-                            .id(videoURL)
-                            .opacity(readyVideoURL == videoURL ? 1 : 0)
-                            .allowsHitTesting(false)
-                        }
                     }
                     .frame(width: heroWidth, height: heroHeight)
                     .clipped()

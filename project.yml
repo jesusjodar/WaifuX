@@ -150,7 +150,6 @@ targets:
     - path: Services/LibraryFolderStore.swift
     - path: Services/LocalImageThumbnailCache.swift
     - path: Services/LocalWallpaperApplyService.swift
-    - path: Services/LocalWallpaperScanner.swift
     - path: Services/LocalizationService.swift
     - path: Services/WallpaperLibraryService.swift
     - path: Services/MenuBarQuickSwitcherController.swift
@@ -191,6 +190,7 @@ targets:
     - path: DesignSystem/ThemeManager.swift
     - path: Services/StaticWallpaperRequestCoordinator.swift
     - path: Models/StaticWallpaperRotationState.swift
+    - path: Utilities/String+CacheKey.swift
     dependencies:
     - package: Kingfisher
     - package: Cache

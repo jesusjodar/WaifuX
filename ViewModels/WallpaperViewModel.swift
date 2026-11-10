@@ -425,10 +425,8 @@ class WallpaperViewModel: ObservableObject {
                 UnifiedLocalWallpaper(
                     id: record.wallpaper.id,
                     wallpaper: record.wallpaper,
-                    localItem: nil,
                     downloadRecord: record,
-                    fileURL: record.localFileURL,
-                    isLocalFile: false
+                    fileURL: record.localFileURL
                 )
             }
             .sorted {
@@ -1433,18 +1431,16 @@ enum TopRange: String {
 // MARK: - 统一的本地壁纸表示
 
 /// 统一的本地壁纸表示
-/// 用于混合显示下载记录和用户手动复制到目录的本地文件
+/// A verified downloaded Wallhaven image and its library metadata.
 struct UnifiedLocalWallpaper: Identifiable {
     let id: String
     let wallpaper: Wallpaper
-    let localItem: LocalWallpaperItem?
     let downloadRecord: WallpaperDownloadRecord?
     let fileURL: URL
-    let isLocalFile: Bool
 
     /// 标题
     var title: String {
-        localItem?.title ?? "Wallpaper"
+        wallpaper.title ?? wallpaper.primaryTagName ?? "Wallhaven \(wallpaper.id)"
     }
 
     /// 分辨率
@@ -1454,10 +1450,6 @@ struct UnifiedLocalWallpaper: Identifiable {
 
     /// 文件大小标签
     var fileSizeLabel: String {
-        if let localItem = localItem, let size = localItem.fileSize {
-            let mb = Double(size) / 1024 / 1024
-            return String(format: "%.1f MB", mb)
-        }
         return wallpaper.fileSizeLabel
     }
 
@@ -1465,9 +1457,6 @@ struct UnifiedLocalWallpaper: Identifiable {
     var dateLabel: String? {
         if let record = downloadRecord {
             return formatDate(record.downloadedAt)
-        }
-        if let localItem = localItem, let createdAt = localItem.createdAt {
-            return formatDate(parseISO8601(createdAt))
         }
         return nil
     }

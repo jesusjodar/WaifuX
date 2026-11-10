@@ -339,7 +339,6 @@ final class DownloadPathManager {
 
     enum ContentType {
         case wallpaper
-        case media
     }
 
     func destinationFolder(for type: ContentType) -> URL {
@@ -451,7 +450,6 @@ extension Notification.Name {
 
 enum MainWallpaperDetailRequest {
     case wallpaper(Wallpaper)
-    case media(MediaItem)
 }
 
 enum MainNavigationRequestStore {
@@ -462,7 +460,6 @@ enum MainNavigationRequestStore {
 
     private enum WallpaperDetailKind: String {
         case wallpaper
-        case media
     }
 
     static func requestLibraryTab() {
@@ -487,11 +484,10 @@ enum MainNavigationRequestStore {
         let payload: Data?
         switch request {
         case .wallpaper(let wallpaper):
+            guard WallhavenContentPolicy.isWallpaperRecord(id: wallpaper.id, detailURL: wallpaper.url, imagePath: wallpaper.path) else { return }
             kind = .wallpaper
             payload = try? JSONEncoder().encode(wallpaper)
-        case .media(let media):
-            kind = .media
-            payload = try? JSONEncoder().encode(media)
+
         }
 
         guard let payload else { return }
@@ -510,13 +506,12 @@ enum MainNavigationRequestStore {
 
         switch kind {
         case .wallpaper:
-            return (try? JSONDecoder().decode(Wallpaper.self, from: payload))
-                .map(MainWallpaperDetailRequest.wallpaper)
-        case .media:
-            return (try? JSONDecoder().decode(MediaItem.self, from: payload))
-                .map(MainWallpaperDetailRequest.media)
+            guard let image = try? JSONDecoder().decode(Wallpaper.self, from: payload),
+                  WallhavenContentPolicy.isWallpaperRecord(id: image.id, detailURL: image.url, imagePath: image.path) else { return nil }
+            return .wallpaper(image)
         }
     }
+
 
     static func clearWallpaperDetailRequest() {
         WaifuXPreferences.shared.removeObject(forKey: pendingWallpaperDetailKindKey)
