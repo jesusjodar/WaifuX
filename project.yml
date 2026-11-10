@@ -108,6 +108,9 @@ targets:
     type: application
     platform: macOS
     sources:
+    - path: Tests/WallhavenCloudIntegrationProbe.swift
+      configFilters:
+      - Debug
     - path: App
       excludes:
       - Info.plist
@@ -137,6 +140,7 @@ targets:
     - path: Models/SchedulerConfig.swift
     - path: Models/WallhavenAPI.swift
     - path: Models/WallhavenContentPolicy.swift
+    - path: Models/WallhavenLibraryFilePolicy.swift
     - path: Models/Wallpaper.swift
     - path: Models/WallpaperOption.swift
     - path: Services/Sync

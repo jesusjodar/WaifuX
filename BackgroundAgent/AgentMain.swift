@@ -283,6 +283,19 @@ private enum AgentMain {
             if let data = try? JSONEncoder().encode(status), let line = String(data: data, encoding: .utf8) { print(line) }
             return
         }
+        #if DEBUG
+        if CommandLine.arguments.contains("--wallhaven-cloud-regression") {
+            guard BackgroundRuntimeRole.isIsolatedTest else { exit(2) }
+            let app = NSApplication.shared
+            app.setActivationPolicy(.accessory)
+            Task { @MainActor in
+                do { try await WallhavenCloudIntegrationProbe.run(); exit(0) }
+                catch { print("CLOUD_REGRESSION_FAILED \(error)"); exit(1) }
+            }
+            app.run()
+            return
+        }
+        #endif
         let app = NSApplication.shared
         app.setActivationPolicy(.accessory)
         let delegate = AgentApplicationDelegate()

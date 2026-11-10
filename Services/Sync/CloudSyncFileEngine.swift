@@ -28,48 +28,17 @@ final actor CloudSyncFileEngine {
         return digest.map { String(format: "%02x", $0) }.joined()
     }
 
-    /// 扫描本地下载目录，生成当前 manifest
-    /// - parameter basePath: 基础路径（如 Wallpapers/、Media/、SceneBakes/）
-    /// - parameter directoryURL: 对应的完整目录 URL（来自 DownloadPathManager）
-    func scanLocalDirectory(
-        basePath: String,
-        directoryURL: URL
-    ) throws -> [String: CloudSyncManifest.CloudSyncManifestEntry] {
+    /// Hash only the explicitly authorized originals; never enumerate the user's library.
+    func scanLocalFiles(_ files: [String: URL], root: URL) throws -> [String: CloudSyncManifest.CloudSyncManifestEntry] {
         var entries: [String: CloudSyncManifest.CloudSyncManifestEntry] = [:]
-
-        guard fileManager.fileExists(atPath: directoryURL.path),
-              let enumerator = fileManager.enumerator(
-                at: directoryURL,
-                includingPropertiesForKeys: [.fileSizeKey, .contentModificationDateKey],
-                options: [.skipsHiddenFiles, .skipsPackageDescendants]
-              ) else {
-            return entries
+        for (relativePath, url) in files {
+            guard let destination = WallhavenLibraryFilePolicy.destination(relativePath: relativePath, root: root),
+                  destination.path == url.standardizedFileURL.path else { continue }
+            let values = try? url.resourceValues(forKeys: [.isRegularFileKey, .isSymbolicLinkKey, .fileSizeKey, .contentModificationDateKey])
+            guard values?.isRegularFile == true, values?.isSymbolicLink != true,
+                  let size = values?.fileSize, let date = values?.contentModificationDate else { continue }
+            entries[relativePath] = .init(hash: try computeFileHash(at: url), size: Int64(size), mtime: date)
         }
-
-        let directoryPrefix = directoryURL.standardizedFileURL.resolvingSymlinksInPath().path + "/"
-        for case let fileURL as URL in enumerator {
-            var isDirectory: ObjCBool = false
-            guard fileManager.fileExists(atPath: fileURL.path, isDirectory: &isDirectory),
-                  !isDirectory.boolValue else { continue }
-
-            let resourceValues = try fileURL.resourceValues(forKeys: [.fileSizeKey, .contentModificationDateKey])
-            guard let fileSize = resourceValues.fileSize,
-                  let mtime = resourceValues.contentModificationDate else { continue }
-
-            // 计算相对路径
-            let canonicalPath = fileURL.standardizedFileURL.resolvingSymlinksInPath().path
-            guard canonicalPath.hasPrefix(directoryPrefix) else { continue }
-            let relativePath = basePath + "/" + canonicalPath.dropFirst(directoryPrefix.count)
-
-            let hash = try computeFileHash(at: fileURL)
-
-            entries[relativePath] = CloudSyncManifest.CloudSyncManifestEntry(
-                hash: hash,
-                size: Int64(fileSize),
-                mtime: mtime
-            )
-        }
-
         return entries
     }
 
@@ -79,6 +48,8 @@ final actor CloudSyncFileEngine {
         hash: String,
         objectsDir: URL
     ) throws {
+        guard WallhavenLibraryFilePolicy.isObjectHash(hash) else { throw CloudSyncError.fileHashFailed(path: hash) }
+        guard try computeFileHash(at: localURL) == hash else { throw CloudSyncError.fileHashFailed(path: localURL.path) }
         let objectPath = CloudSyncDirectoryLayout.objectSubpath(hash: hash)
         let objectURL = objectsDir.appendingPathComponent(objectPath)
 
@@ -108,6 +79,7 @@ final actor CloudSyncFileEngine {
         objectsDir: URL,
         destinationURL: URL
     ) throws {
+        guard WallhavenLibraryFilePolicy.isObjectHash(hash) else { throw CloudSyncError.fileHashFailed(path: hash) }
         let objectPath = CloudSyncDirectoryLayout.objectSubpath(hash: hash)
         let currentURL = objectsDir.appendingPathComponent(objectPath)
         // Older builds accidentally wrote objects/objects/<prefix>/<hash>.
@@ -130,23 +102,27 @@ final actor CloudSyncFileEngine {
             withIntermediateDirectories: true
         )
 
-        // 拷贝（如果已存在且 hash 相同，跳过）
+        if fileManager.fileExists(atPath: destinationURL.path),
+           try computeFileHash(at: destinationURL) == hash { return }
+        let temporary = destinationURL.deletingLastPathComponent().appendingPathComponent(".wallhaven-sync-\(UUID().uuidString)")
+        defer { try? fileManager.removeItem(at: temporary) }
+        try fileManager.copyItem(at: objectURL, to: temporary)
+        guard try computeFileHash(at: temporary) == hash else { throw CloudSyncError.fileHashFailed(path: temporary.path) }
         if fileManager.fileExists(atPath: destinationURL.path) {
-            let existingHash = try? computeFileHash(at: destinationURL)
-            if existingHash == hash { return }
-            try fileManager.removeItem(at: destinationURL)
+            _ = try fileManager.replaceItemAt(destinationURL, withItemAt: temporary)
+        } else {
+            try fileManager.moveItem(at: temporary, to: destinationURL)
         }
-
-        try fileManager.copyItem(at: objectURL, to: destinationURL)
     }
 
     /// 读取云端 manifest
     func readManifest(from url: URL) throws -> CloudSyncManifest {
-        guard fileManager.fileExists(atPath: url.path) else {
+        let selected = fileManager.fileExists(atPath: url.path) ? url
+            : url.deletingLastPathComponent().appendingPathComponent(CloudSyncDirectoryLayout.legacyManifestFileName)
+        guard fileManager.fileExists(atPath: selected.path) else {
             return CloudSyncManifest(files: [:], updatedAt: Date())
         }
-
-        let data = try Data(contentsOf: url)
+        let data = try Data(contentsOf: selected)
         do {
             let manifest = try JSONDecoder().decode(CloudSyncManifest.self, from: data)
             return manifest
@@ -166,58 +142,11 @@ final actor CloudSyncFileEngine {
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         let data = try encoder.encode(manifest)
 
-        try data.write(to: url)
+        try data.write(to: url, options: .atomic)
     }
 
-    /// GC：删除 objects 中未被任何 manifest 引用的文件
-    func garbageCollect(objectsDir: URL, referencedHashes: Set<String>) throws {
-        guard fileManager.fileExists(atPath: objectsDir.path) else { return }
-
-        guard let enumerator = fileManager.enumerator(
-            at: objectsDir,
-            includingPropertiesForKeys: [.isDirectoryKey]
-        ) else { return }
-
-        for case let fileURL as URL in enumerator {
-            var isDirectory: ObjCBool = false
-            guard fileManager.fileExists(atPath: fileURL.path, isDirectory: &isDirectory),
-                  !isDirectory.boolValue else { continue }
-
-            let fileName = fileURL.lastPathComponent
-            if !referencedHashes.contains(fileName) {
-                try fileManager.removeItem(at: fileURL)
-            }
-        }
-
-        // 清理空子目录
-        try removeEmptyDirectories(at: objectsDir)
-    }
-
-    /// 清理空目录
-    private func removeEmptyDirectories(at url: URL) throws {
-        guard fileManager.fileExists(atPath: url.path) else { return }
-
-        let contents = try fileManager.contentsOfDirectory(
-            at: url,
-            includingPropertiesForKeys: [.isDirectoryKey],
-            options: .skipsHiddenFiles
-        )
-
-        for dirURL in contents {
-            var isDirectory: ObjCBool = false
-            guard fileManager.fileExists(atPath: dirURL.path, isDirectory: &isDirectory),
-                  isDirectory.boolValue else { continue }
-
-            try removeEmptyDirectories(at: dirURL)
-            let subContents = try fileManager.contentsOfDirectory(
-                at: dirURL,
-                includingPropertiesForKeys: nil
-            )
-            if subContents.isEmpty {
-                try fileManager.removeItem(at: dirURL)
-            }
-        }
-    }
+    // The content-addressed object directory is shared with older builds.
+    // Never garbage-collect it: legacy snapshots may reference any of its objects.
 
     /// 确保同步目录结构存在
     func ensureSyncDirectory(at versionRootURL: URL) throws {

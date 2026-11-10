@@ -5,6 +5,8 @@ test_dir="$(mktemp -d "${TMPDIR:-/tmp}/waifux-static-tests.XXXXXX")"
 trap 'rm -rf "$test_dir"' EXIT
 swiftc -parse-as-library \
   "$repo_root/Models/WallhavenContentPolicy.swift" \
+  "$repo_root/Models/WallhavenLibraryFilePolicy.swift" \
+  "$repo_root/Models/FavoriteSource.swift" \
   "$repo_root/Models/WallhavenAPI.swift" \
   "$repo_root/Utilities/WallpaperSnapshotPixelBudget.swift" \
   "$repo_root/Utilities/LegacyRecordReader.swift" \

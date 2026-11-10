@@ -136,3 +136,9 @@ Tools/MobilePush/__pycache__/
 !/Tests/WallhavenStaticCoreTests.swift
 
 !/Tests/WallhavenDownloadQueueTests.swift
+
+!/Tests/WallhavenCloudFileTests.swift
+
+!/Tests/WallhavenCloudIntegrationProbe.swift
+
+!scripts/test-wallhaven-cloud-integration.py

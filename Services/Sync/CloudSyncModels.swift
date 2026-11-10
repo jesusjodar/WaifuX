@@ -27,6 +27,25 @@ struct CloudSyncManifest: Codable {
     var files: [String: CloudSyncManifestEntry]  // 相对路径 → 条目
     var updatedAt: Date
 
+    private enum CodingKeys: String, CodingKey { case version, files, updatedAt }
+    init(files: [String: CloudSyncManifestEntry], updatedAt: Date) {
+        self.files = files
+        self.updatedAt = updatedAt
+    }
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        version = try values.decodeIfPresent(Int.self, forKey: .version) ?? 1
+        guard version == 1 else {
+            throw DecodingError.dataCorruptedError(forKey: .version, in: values, debugDescription: "Unsupported manifest version")
+        }
+        updatedAt = try values.decodeIfPresent(Date.self, forKey: .updatedAt) ?? .distantPast
+        let decoded = try LegacyRecordReader.readDictionary(CloudSyncManifestEntry.self, from: values.superDecoder(forKey: .files))
+        files = decoded.filter { path, entry in
+            WallhavenLibraryFilePolicy.wallpaperID(relativePath: path) != nil
+                && WallhavenLibraryFilePolicy.isObjectHash(entry.hash) && entry.size >= 0
+        }
+    }
+
     struct CloudSyncManifestEntry: Codable {
         let hash: String          // SHA-256 hex
         let size: Int64
@@ -38,8 +57,10 @@ struct CloudSyncManifest: Codable {
 enum CloudSyncDirectoryLayout {
     static let rootName = "WaifuXSync"
     static let versionDir = "v1"
-    static let metadataFileName = "metadata.json"
-    static let manifestFileName = "manifest.json"
+    static let metadataFileName = "wallhaven-metadata-v1.json"
+    static let legacyMetadataFileName = "metadata.json"
+    static let manifestFileName = "wallhaven-manifest-v1.json"
+    static let legacyManifestFileName = "manifest.json"
     static let objectsDirName = "objects"
 
     /// Path relative to the objects directory, which callers already supply.

@@ -41,42 +41,6 @@ final actor CloudSyncWebDAVEngine {
         return digest.map { String(format: "%02x", $0) }.joined()
     }
 
-    // MARK: - 扫描远程目录
-
-    /// 递归扫描远程目录，返回相对路径到 ManifestEntry 的映射
-    func scanRemoteDirectory(
-        baseURL: URL,
-        basePath: String,
-        credentials: WebDAVCredentials
-    ) async throws -> [String: CloudSyncManifest.CloudSyncManifestEntry] {
-        var entries: [String: CloudSyncManifest.CloudSyncManifestEntry] = [:]
-
-        let resources = try await client.recursivePropFind(
-            url: baseURL,
-            credentials: credentials
-        )
-
-        for resource in resources where !resource.isCollection {
-            // 从 href 计算相对路径
-            let decodedHref = resource.href.removingPercentEncoding ?? resource.href
-            let relativePath = basePath + "/" + decodedHref
-                .replacingOccurrences(of: baseURL.path, with: "")
-
-            let hash = try await computeRemoteFileHash(
-                url: buildResourceURL(base: baseURL, href: resource.href),
-                credentials: credentials
-            )
-
-            entries[relativePath] = CloudSyncManifest.CloudSyncManifestEntry(
-                hash: hash,
-                size: resource.contentLength ?? 0,
-                mtime: resource.lastModified ?? Date()
-            )
-        }
-
-        return entries
-    }
-
     // MARK: - 上传/下载
 
     /// 上传本地文件到 WebDAV objects 目录
@@ -86,6 +50,7 @@ final actor CloudSyncWebDAVEngine {
         objectsBaseURL: URL,
         credentials: WebDAVCredentials
     ) async throws {
+        guard WallhavenLibraryFilePolicy.isObjectHash(hash) else { throw CloudSyncError.fileHashFailed(path: hash) }
         let objectPath = CloudSyncDirectoryLayout.objectSubpath(hash: hash)
         let objectURL = objectsBaseURL.appendingPathComponent(objectPath)
 
@@ -107,6 +72,8 @@ final actor CloudSyncWebDAVEngine {
             throw CloudSyncError.fileReadFailed(path: localURL.path)
         }
         let fileData = try Data(contentsOf: localURL)
+        let digest = SHA256.hash(data: fileData).map { String(format: "%02x", $0) }.joined()
+        guard digest == hash else { throw CloudSyncError.fileHashFailed(path: localURL.path) }
 
         try await client.put(
             url: objectURL,
@@ -122,6 +89,7 @@ final actor CloudSyncWebDAVEngine {
         destinationURL: URL,
         credentials: WebDAVCredentials
     ) async throws {
+        guard WallhavenLibraryFilePolicy.isObjectHash(hash) else { throw CloudSyncError.fileHashFailed(path: hash) }
         let objectPath = CloudSyncDirectoryLayout.objectSubpath(hash: hash)
         let objectURL = objectsBaseURL.appendingPathComponent(objectPath)
 
@@ -145,7 +113,6 @@ final actor CloudSyncWebDAVEngine {
         if localFileManager.fileExists(atPath: destinationURL.path) {
             let existingHash = try? computeLocalFileHash(at: destinationURL)
             if existingHash == hash { return }
-            try localFileManager.removeItem(at: destinationURL)
         }
 
         // 确保目标目录存在
@@ -154,7 +121,7 @@ final actor CloudSyncWebDAVEngine {
             withIntermediateDirectories: true
         )
 
-        try data.write(to: destinationURL)
+        try data.write(to: destinationURL, options: .atomic)
     }
 
     // MARK: - Manifest
@@ -164,18 +131,15 @@ final actor CloudSyncWebDAVEngine {
         baseURL: URL,
         credentials: WebDAVCredentials
     ) async throws -> CloudSyncManifest {
-        let manifestURL = baseURL.appendingPathComponent(CloudSyncDirectoryLayout.manifestFileName)
-
-        do {
-            let data = try await client.get(url: manifestURL, credentials: credentials)
-            let manifest = try JSONDecoder().decode(CloudSyncManifest.self, from: data)
-            return manifest
-        } catch let error as CloudSyncError {
-            if case .webDAVNotFound = error {
-                return CloudSyncManifest(files: [:], updatedAt: Date())
+        for name in [CloudSyncDirectoryLayout.manifestFileName, CloudSyncDirectoryLayout.legacyManifestFileName] {
+            do {
+                let data = try await client.get(url: baseURL.appendingPathComponent(name), credentials: credentials)
+                return try JSONDecoder().decode(CloudSyncManifest.self, from: data)
+            } catch let error as CloudSyncError {
+                guard case .webDAVNotFound = error else { throw error }
             }
-            throw error
         }
+        return CloudSyncManifest(files: [:], updatedAt: Date())
     }
 
     /// 写入远程 manifest
@@ -198,27 +162,7 @@ final actor CloudSyncWebDAVEngine {
         )
     }
 
-    // MARK: - GC
-
-    /// 清理远程 objects 中未被引用的文件
-    func garbageCollect(
-        objectsBaseURL: URL,
-        referencedHashes: Set<String>,
-        credentials: WebDAVCredentials
-    ) async throws {
-        let resources = try await client.recursivePropFind(
-            url: objectsBaseURL,
-            credentials: credentials
-        )
-
-        for resource in resources where !resource.isCollection {
-            let fileName = URL(string: resource.href)?.lastPathComponent ?? ""
-            if !referencedHashes.contains(fileName) {
-                let fileURL = buildResourceURL(base: objectsBaseURL, href: resource.href)
-                try await client.delete(url: fileURL, credentials: credentials)
-            }
-        }
-    }
+    // Shared legacy cloud objects are deliberately never garbage-collected.
 
     // MARK: - 确保目录结构
 
@@ -237,25 +181,4 @@ final actor CloudSyncWebDAVEngine {
         try await client.mkcol(url: objectsDir, credentials: credentials)
     }
 
-    // MARK: - 工具
-
-    private func buildResourceURL(base: URL, href: String) -> URL {
-        if href.hasPrefix("http") {
-            return URL(string: href) ?? base
-        }
-        if href.hasPrefix("/") {
-            guard let components = URLComponents(url: base, resolvingAgainstBaseURL: false),
-                  let baseHost = components.host,
-                  let scheme = components.scheme else {
-                return base
-            }
-            var result = "\(scheme)://\(baseHost)"
-            if let port = components.port {
-                result += ":\(port)"
-            }
-            let path = href.hasPrefix("/") ? href : "/" + href
-            return URL(string: result + path) ?? base
-        }
-        return URL(string: href, relativeTo: base)?.absoluteURL ?? base
-    }
 }

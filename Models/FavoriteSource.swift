@@ -64,7 +64,7 @@ struct SyncMetadata: Codable, Hashable {
     }
 
     mutating func markSynced(changeTag: String? = nil, at date: Date = .now) {
-        updatedAt = date
+        // Sync acknowledgement is not a content mutation. Preserve conflict ordering.
         lastSyncedAt = date
         self.changeTag = changeTag
         syncState = .synced

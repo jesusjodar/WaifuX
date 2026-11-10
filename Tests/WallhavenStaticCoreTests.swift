@@ -134,6 +134,19 @@ enum WallhavenStaticCoreTests {
         for address in ["https://a.wallhaven.cc.evil.test/avatar.png", "http://a.wallhaven.cc/avatar.png", "https://u@a.wallhaven.cc/avatar.png", "https://a.wallhaven.cc:9000/avatar.png", "https://a.wallhaven.cc/avatar.mp4"] {
             precondition(!WallhavenContentPolicy.isImageRequestURL(URL(string: address)!))
         }
+        precondition(WallhavenLibraryFilePolicy.wallpaperID(relativePath: "Wallpapers/wallhaven-abc123.png") == "abc123")
+        precondition(WallhavenLibraryFilePolicy.wallpaperID(relativePath: "Wallpapers/abc123.jpg") == "abc123")
+        for path in ["../Wallpapers/abc123.jpg", "/Wallpapers/abc123.jpg", "Wallpapers/../abc123.jpg", "Wallpapers/a/abc123.jpg", "Media/abc123.jpg", "Wallpapers/wallhaven-abc123.mp4", "Wallpapers/ABC123.jpg", "Wallpapers/wallhaven-abc123.jpg?x", "Wallpapers//abc123.jpg"] {
+            precondition(WallhavenLibraryFilePolicy.wallpaperID(relativePath: path) == nil)
+        }
+        precondition(WallhavenLibraryFilePolicy.originalFilename(id: "abc123", recordedPath: "/old/device/Wallpapers/wallhaven-abc123.png") == "wallhaven-abc123.png")
+        precondition(WallhavenLibraryFilePolicy.originalFilename(id: "abc123", recordedPath: "/private/personal.png") == nil)
+        precondition(WallhavenLibraryFilePolicy.isObjectHash(String(repeating: "f", count: 64)))
+        precondition(!WallhavenLibraryFilePolicy.isObjectHash(String(repeating: "F", count: 64)))
+        precondition(!WallhavenLibraryFilePolicy.isObjectHash("../object"))
+        var metadata = SyncMetadata(recordID: "test", entityType: "wallpaper", updatedAt: Date(timeIntervalSince1970: 10), isDeleted: true)
+        metadata.markSynced(at: Date(timeIntervalSince1970: 20))
+        precondition(metadata.updatedAt == Date(timeIntervalSince1970: 10) && metadata.isDeleted && metadata.lastSyncedAt == Date(timeIntervalSince1970: 20))
         for dimensions in [(7680.0, 4320.0), (50000, 100000), (1, 1000000)] {
             for bytes in [4, 8, 16] {
                 let layout = WallpaperSnapshotPixelBudget.layout(width: dimensions.0, height: dimensions.1, decodedBytesPerPixel: bytes)!

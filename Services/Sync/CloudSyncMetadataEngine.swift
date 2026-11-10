@@ -95,14 +95,14 @@ final class CloudSyncMetadataEngine {
 
     var records = CloudSyncRecords()
     records.wallpaperFavorites = wallpaperLib.favoriteRecords
-    records.wallpaperDownloads = wallpaperLib.downloadRecords.map { record in
+    records.wallpaperDownloads = wallpaperLib.downloadRecords.compactMap { record in
+      guard let filename = Self.cloudFilename(for: record) else { return nil }
       var record = record
-      record.localFilePath = Self.relativizePath(
-        record.localFilePath, baseFolder: downloadMgr.wallpapersFolderURL.path)
+      record.localFilePath = filename
       return record
     }
     records.libraryFolders = LibraryFoldersPayload(wallpaper: folderStore.wallpaperFolders)
-    records.libraryGridOrder = gridStore.exportOrders()
+    records.libraryGridOrder = filteredGridOrder(gridStore.exportOrders())
     records.settings = settingsPayload
     return CloudSyncMetadataPayload(deviceID: Self.deviceID, syncedAt: Date(), records: records)
   }
@@ -166,21 +166,11 @@ final class CloudSyncMetadataEngine {
       id: wallpaper.id, detailURL: wallpaper.url, imagePath: wallpaper.path)
   }
 
-  // MARK: - 内部：路径处理
-
-  /// 将绝对路径转换为相对路径（相对于基础目录）
-  private static func relativizePath(_ absolutePath: String, baseFolder: String) -> String {
-    let prefix = baseFolder.hasSuffix("/") ? baseFolder : baseFolder + "/"
-    guard absolutePath.hasPrefix(prefix) else { return absolutePath }
-    var relative = String(absolutePath.dropFirst(baseFolder.count))
-    if relative.hasPrefix("/") { relative = String(relative.dropFirst()) }
-    return relative
-  }
-
-  /// 将相对路径还原为绝对路径
-  static func absolutizePath(_ relativePath: String, baseFolder: String) -> String {
-    if relativePath.hasPrefix("/") { return relativePath }  // 已经是绝对路径
-    return (baseFolder as NSString).appendingPathComponent(relativePath)
+  private static func cloudFilename(for record: WallpaperDownloadRecord) -> String? {
+    let wallpaper = record.wallpaper
+    guard isWallhaven(wallpaper) else { return nil }
+    return WallhavenLibraryFilePolicy.originalFilename(id: wallpaper.id, recordedPath: record.localFilePath)
+      ?? WallhavenLibraryFilePolicy.originalFilename(id: wallpaper.id, recordedPath: wallpaper.path)
   }
 
   // MARK: - 内部：设备 ID
@@ -205,7 +195,6 @@ extension CloudSyncMetadataEngine {
     let service = WallpaperLibraryService.shared
     let localRecords = service.favoriteRecords
     var toImport: [WallpaperFavoriteRecord] = []
-    var toRemoveIDs: Set<String> = []
 
     for cloudRecord in cloudRecords where Self.isWallhaven(cloudRecord.wallpaper) {
       let id = cloudRecord.wallpaper.id
@@ -220,17 +209,12 @@ extension CloudSyncMetadataEngine {
         switch resolution {
         case .useLocal: continue
         case .useCloud:
-          if cloudRecord.metadata.isDeleted {
-            toRemoveIDs.insert(id)
-          } else {
-            var merged = cloudRecord
-            merged.metadata.markSynced()
-            toImport.append(merged)
-          }
+          var merged = cloudRecord
+          merged.metadata.markSynced()
+          toImport.append(merged)
         case .skip: continue
         }
       } else {
-        guard !cloudRecord.metadata.isDeleted else { continue }
         var record = cloudRecord
         record.metadata.markSynced()
         toImport.append(record)
@@ -238,7 +222,6 @@ extension CloudSyncMetadataEngine {
     }
 
     if !toImport.isEmpty { service.syncImportFavorites(toImport) }
-    if !toRemoveIDs.isEmpty { service.syncRemoveFavorites(ids: toRemoveIDs) }
   }
 
   // MARK: 壁纸下载合并
@@ -248,17 +231,14 @@ extension CloudSyncMetadataEngine {
     let service = WallpaperLibraryService.shared
     let localRecords = service.downloadRecords
     let downloadMgr = DownloadPathManager.shared
-    let basePath = downloadMgr.wallpapersFolderURL.path
     var toImport: [WallpaperDownloadRecord] = []
-    var toRemoveIDs: Set<String> = []
 
     for var cloudRecord in cloudRecords where Self.isWallhaven(cloudRecord.wallpaper) {
       let id = cloudRecord.wallpaper.id
-      // 重建绝对路径
-      if !cloudRecord.localFilePath.isEmpty && !cloudRecord.localFilePath.hasPrefix("/") {
-        cloudRecord.localFilePath = (basePath as NSString).appendingPathComponent(
-          cloudRecord.localFilePath)
-      }
+      guard let filename = Self.cloudFilename(for: cloudRecord),
+        let destination = WallhavenLibraryFilePolicy.destination(
+          relativePath: "Wallpapers/\(filename)", root: downloadMgr.rootFolderURL) else { continue }
+      cloudRecord.localFilePath = destination.path
 
       if let localRecord = localRecords.first(where: { $0.wallpaper.id == id }) {
         let resolution = CloudSyncConflictResolver.resolveRecord(
@@ -271,17 +251,12 @@ extension CloudSyncMetadataEngine {
         switch resolution {
         case .useLocal: continue
         case .useCloud:
-          if cloudRecord.metadata.isDeleted {
-            toRemoveIDs.insert(id)
-          } else {
-            var merged = cloudRecord
-            merged.metadata.markSynced()
-            toImport.append(merged)
-          }
+          var merged = cloudRecord
+          merged.metadata.markSynced()
+          toImport.append(merged)
         case .skip: continue
         }
       } else {
-        guard !cloudRecord.metadata.isDeleted else { continue }
         var record = cloudRecord
         record.metadata.markSynced()
         toImport.append(record)
@@ -289,23 +264,40 @@ extension CloudSyncMetadataEngine {
     }
 
     if !toImport.isEmpty { service.syncImportDownloads(toImport) }
-    if !toRemoveIDs.isEmpty { service.syncRemoveDownloads(ids: toRemoveIDs) }
   }
 
   // MARK: 库文件夹合并
   func mergeLibraryFolders(
     _ cloudFolders: LibraryFoldersPayload, strategy: CloudSyncConflictStrategy
   ) {
-    guard strategy == .cloudPreferred else { return }
     let store = LibraryFolderStore.shared
-    store.syncImportWallpaperFolders(cloudFolders.wallpaper)
+    let local = Dictionary(store.wallpaperFolders.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+    let incoming = cloudFolders.wallpaper.filter { folder in
+      guard let existing = local[folder.id] else { return true }
+      return folder.updatedAt > existing.updatedAt || (strategy == .cloudPreferred && folder.updatedAt == existing.updatedAt)
+    }
+    store.syncImportWallpaperFolders(incoming)
   }
 
-  // MARK: Grid 排序合并
+  private func filteredGridOrder(_ order: [String: [String]]) -> [String: [String]] {
+    let library = WallpaperLibraryService.shared
+    let ids = Set(library.favoriteRecords.map { $0.wallpaper.id })
+      .union(library.downloadRecords.map { $0.wallpaper.id })
+      .union(LibraryFolderStore.shared.wallpaperFolders.map { "folder_\($0.id)" })
+    return order.filter { $0.key.hasPrefix("wallpaper.") }.mapValues { values in
+      var seen = Set<String>()
+      return values.filter { ids.contains($0) && seen.insert($0).inserted }
+    }
+  }
+
   func mergeGridOrder(_ cloudOrder: [String: [String]], strategy: CloudSyncConflictStrategy) {
-    guard strategy == .cloudPreferred else { return }
     let store = LibraryGridOrderStore.shared
-    store.syncImportOrders(cloudOrder)
+    let incoming = filteredGridOrder(cloudOrder)
+    var combined = filteredGridOrder(store.exportOrders())
+    for (scope, ids) in incoming where strategy == .cloudPreferred || combined[scope] == nil {
+      combined[scope] = ids
+    }
+    store.syncImportOrders(combined)
   }
 
 }

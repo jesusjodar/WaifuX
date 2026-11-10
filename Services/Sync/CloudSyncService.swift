@@ -50,12 +50,7 @@ final class CloudSyncService: ObservableObject {
         syncProgress = 0
         syncStatusMessage = t("准备同步...")
 
-        defer {
-            isSyncing = false
-            let now = Date()
-            config.lastSyncedAt = now
-            lastSyncedAt = now
-        }
+        defer { isSyncing = false }
 
         do {
             switch config.syncMode {
@@ -64,6 +59,9 @@ final class CloudSyncService: ObservableObject {
             case .webDAV:
                 try await performWebDAVSync()
             }
+            let now = Date()
+            config.lastSyncedAt = now
+            lastSyncedAt = now
         } catch let error as CloudSyncError {
             lastError = error
             syncStatusMessage = String(format: t("同步失败: %@"), String(describing: error.localizedDescription))
@@ -77,149 +75,46 @@ final class CloudSyncService: ObservableObject {
     // MARK: - 本地文件夹同步
 
     private func performLocalSync() async throws {
-        guard config.isEnabled, let syncRoot = config.syncRootURL else {
-            throw CloudSyncError.syncDirectoryNotSet
-        }
-
-        // 1. 确保同步目录结构存在
-        syncStatusMessage = t("检查同步目录...")
+        guard config.isEnabled, let syncRoot = config.syncRootURL,
+              let manifestURL = config.manifestURL, let metadataURL = config.metadataURL,
+              let objectsDir = config.objectsURL else { throw CloudSyncError.syncDirectoryNotSet }
         try await fileEngine.ensureSyncDirectory(at: syncRoot)
-        syncProgress = 0.05
-
-        // 2. 读取云端 manifest
-        syncStatusMessage = t("读取云端文件清单...")
-        let cloudManifest = try await fileEngine.readManifest(from: config.manifestURL!)
-        syncProgress = 0.1
-
-        // 3. 扫描本地下载目录
-        let downloadMgr = DownloadPathManager.shared
-        let localManifest = try await scanLocalFiles(downloadMgr: downloadMgr)
-        syncProgress = 0.2
-
-        // 4. 对比 manifest，上传/下载文件
-        let objectsDir = config.objectsURL!
-        var referencedHashes = try await performFileSync(
-            localManifest: localManifest,
-            cloudManifest: cloudManifest,
-            objectsDir: objectsDir,
-            downloadMgr: downloadMgr,
-            uploadFile: { localURL, hash in
-                try await self.fileEngine.uploadFile(localURL: localURL, hash: hash, objectsDir: objectsDir)
-            },
-            downloadFile: { hash, destURL in
-                try await self.fileEngine.downloadFile(hash: hash, objectsDir: objectsDir, destinationURL: destURL)
-            }
-        )
-        syncProgress = 0.7
-
-        // 5. 导出元数据 + 写入云端
-        syncStatusMessage = t("同步元数据...")
-        let metadataData = try metadataEngine.exportMetadata()
-        try metadataData.write(to: config.metadataURL!, options: .atomic)
-        syncProgress = 0.8
-
-        // 6. 更新云端 manifest
-        let updatedManifest = CloudSyncManifest(files: localManifest, updatedAt: Date())
-        try await fileEngine.writeManifest(updatedManifest, to: config.manifestURL!)
-        syncProgress = 0.85
-
-        // 7. GC
-        syncStatusMessage = t("清理旧文件...")
-        try await fileEngine.garbageCollect(objectsDir: objectsDir, referencedHashes: referencedHashes)
-        syncProgress = 0.9
-
-        // 8. 读取云端 metadata 合并到本地
-        if FileManager.default.fileExists(atPath: config.metadataURL!.path) {
-            let cloudData = try Data(contentsOf: config.metadataURL!)
-            try metadataEngine.importMetadata(from: cloudData, strategy: config.conflictStrategy)
+        let cloudManifest = try await fileEngine.readManifest(from: manifestURL)
+        if let metadata = try localCloudMetadata() {
+            try metadataEngine.importMetadata(from: metadata, strategy: config.conflictStrategy)
         }
-        syncProgress = 1.0
+        let manager = DownloadPathManager.shared
+        let localManifest = try await scanLocalFiles(downloadMgr: manager)
+        try await performFileSync(localManifest: localManifest, cloudManifest: cloudManifest,
+            downloadMgr: manager,
+            uploadFile: { url, hash in try await self.fileEngine.uploadFile(localURL: url, hash: hash, objectsDir: objectsDir) },
+            downloadFile: { hash, url in try await self.fileEngine.downloadFile(hash: hash, objectsDir: objectsDir, destinationURL: url) })
+        try metadataEngine.exportMetadata().write(to: metadataURL, options: .atomic)
+        let files = try await scanLocalFiles(downloadMgr: manager)
+        try await fileEngine.writeManifest(.init(files: files, updatedAt: Date()), to: manifestURL)
+        syncProgress = 1
         syncStatusMessage = t("同步完成")
     }
 
     // MARK: - WebDAV 同步
 
     private func performWebDAVSync() async throws {
-        guard config.isEnabled,
-              let credentials = config.webDAVCredentials else {
-            throw CloudSyncError.syncDirectoryNotSet
+        guard config.isEnabled, let credentials = config.webDAVCredentials else { throw CloudSyncError.syncDirectoryNotSet }
+        try await webDAVEngine.ensureSyncDirectory(baseURL: credentials.baseURL, credentials: credentials)
+        let cloudManifest = try await webDAVEngine.readManifest(baseURL: credentials.syncRootURL, credentials: credentials)
+        if let metadata = try await remoteCloudMetadata(credentials) {
+            try metadataEngine.importMetadata(from: metadata, strategy: config.conflictStrategy)
         }
-
-        let baseURL = credentials.baseURL
-        let syncBaseURL = credentials.syncRootURL
-        let objectsBaseURL = credentials.objectsURL
-
-        // 1. 确保远程目录结构存在
-        syncStatusMessage = t("检查远程目录...")
-        try await webDAVEngine.ensureSyncDirectory(baseURL: baseURL, credentials: credentials)
-        syncProgress = 0.05
-
-        // 2. 读取远程 manifest
-        syncStatusMessage = t("读取文件清单...")
-        let cloudManifest = try await webDAVEngine.readManifest(baseURL: syncBaseURL, credentials: credentials)
-        syncProgress = 0.1
-
-        // 3. 扫描本地下载目录
-        let downloadMgr = DownloadPathManager.shared
-        let localManifest = try await scanLocalFiles(downloadMgr: downloadMgr)
-        syncProgress = 0.2
-
-        // 4. 上传/下载
-        var referencedHashes = try await performFileSync(
-            localManifest: localManifest,
-            cloudManifest: cloudManifest,
-            objectsDir: objectsBaseURL,
-            downloadMgr: downloadMgr,
-            uploadFile: { localURL, hash in
-                try await self.webDAVEngine.uploadFile(
-                    localURL: localURL, hash: hash,
-                    objectsBaseURL: objectsBaseURL, credentials: credentials
-                )
-            },
-            downloadFile: { hash, destURL in
-                try await self.webDAVEngine.downloadFile(
-                    hash: hash, objectsBaseURL: objectsBaseURL,
-                    destinationURL: destURL, credentials: credentials
-                )
-            }
-        )
-        syncProgress = 0.7
-
-        // 5. 导出元数据 + 写入远程
-        syncStatusMessage = t("同步元数据...")
-        let metadataData = try metadataEngine.exportMetadata()
-        try await client.put(
-            url: credentials.metadataURL,
-            data: metadataData,
-            contentType: "application/json",
-            credentials: credentials
-        )
-        syncProgress = 0.8
-
-        // 6. 更新远程 manifest
-        let updatedManifest = CloudSyncManifest(files: localManifest, updatedAt: Date())
-        try await webDAVEngine.writeManifest(updatedManifest, baseURL: syncBaseURL, credentials: credentials)
-        syncProgress = 0.85
-
-        // 7. GC
-        syncStatusMessage = t("清理旧文件...")
-        try await webDAVEngine.garbageCollect(
-            objectsBaseURL: objectsBaseURL,
-            referencedHashes: referencedHashes,
-            credentials: credentials
-        )
-        syncProgress = 0.9
-
-        // 8. 读取远程 metadata 合并到本地
-        do {
-            let cloudData = try await client.get(url: credentials.metadataURL, credentials: credentials)
-            try metadataEngine.importMetadata(from: cloudData, strategy: config.conflictStrategy)
-        } catch let error as CloudSyncError {
-            if case .webDAVNotFound = error {
-                // 首次同步，没有 metadata 是正常的
-            } else { throw error }
-        }
-        syncProgress = 1.0
+        let manager = DownloadPathManager.shared
+        let localManifest = try await scanLocalFiles(downloadMgr: manager)
+        try await performFileSync(localManifest: localManifest, cloudManifest: cloudManifest,
+            downloadMgr: manager,
+            uploadFile: { url, hash in try await self.webDAVEngine.uploadFile(localURL: url, hash: hash, objectsBaseURL: credentials.objectsURL, credentials: credentials) },
+            downloadFile: { hash, url in try await self.webDAVEngine.downloadFile(hash: hash, objectsBaseURL: credentials.objectsURL, destinationURL: url, credentials: credentials) })
+        try await client.put(url: credentials.metadataURL, data: metadataEngine.exportMetadata(), contentType: "application/json", credentials: credentials)
+        let files = try await scanLocalFiles(downloadMgr: manager)
+        try await webDAVEngine.writeManifest(.init(files: files, updatedAt: Date()), baseURL: credentials.syncRootURL, credentials: credentials)
+        syncProgress = 1
         syncStatusMessage = t("同步完成")
     }
 
@@ -229,74 +124,73 @@ final class CloudSyncService: ObservableObject {
     // MARK: - 公共同步子步骤
 
     /// Scan the retained static wallpaper directory.
+    private func authorizedOriginals(downloadMgr: DownloadPathManager) -> [String: URL] {
+        var result: [String: URL] = [:]
+        for record in WallpaperLibraryService.shared.downloadRecords where record.isActive {
+            let wallpaper = record.wallpaper
+            guard WallhavenContentPolicy.isWallpaperRecord(id: wallpaper.id, detailURL: wallpaper.url, imagePath: wallpaper.path),
+                  let relative = WallhavenLibraryFilePolicy.relativePath(id: wallpaper.id, recordedPath: record.localFilePath),
+                  let destination = WallhavenLibraryFilePolicy.destination(relativePath: relative, root: downloadMgr.rootFolderURL),
+                  destination.path == URL(fileURLWithPath: record.localFilePath).standardizedFileURL.path else { continue }
+            result[relative] = destination
+        }
+        return result
+    }
+
     private func scanLocalFiles(downloadMgr: DownloadPathManager) async throws -> [String: CloudSyncManifest.CloudSyncManifestEntry] {
-        let localWallpapers = try await fileEngine.scanLocalDirectory(
-            basePath: "Wallpapers",
-            directoryURL: downloadMgr.wallpapersFolderURL
-        )
-        return localWallpapers
+        try await fileEngine.scanLocalFiles(authorizedOriginals(downloadMgr: downloadMgr), root: downloadMgr.rootFolderURL)
+    }
+
+    private func localCloudMetadata() throws -> Data? {
+        guard let current = config.metadataURL else { return nil }
+        for url in [current, current.deletingLastPathComponent().appendingPathComponent(CloudSyncDirectoryLayout.legacyMetadataFileName)] {
+            if FileManager.default.fileExists(atPath: url.path) { return try Data(contentsOf: url) }
+        }
+        return nil
+    }
+
+    private func remoteCloudMetadata(_ credentials: WebDAVCredentials) async throws -> Data? {
+        for name in [CloudSyncDirectoryLayout.metadataFileName, CloudSyncDirectoryLayout.legacyMetadataFileName] {
+            do { return try await client.get(url: credentials.syncRootURL.appendingPathComponent(name), credentials: credentials) }
+            catch let error as CloudSyncError {
+                guard case .webDAVNotFound = error else { throw error }
+            }
+        }
+        return nil
     }
 
     /// 上传/下载文件循环
     private func performFileSync(
         localManifest: [String: CloudSyncManifest.CloudSyncManifestEntry],
         cloudManifest: CloudSyncManifest,
-        objectsDir: URL,
         downloadMgr: DownloadPathManager,
         uploadFile: (URL, String) async throws -> Void,
         downloadFile: (String, URL) async throws -> Void
-    ) async throws -> Set<String> {
-        var referencedHashes = Set<String>()
-
-        // 收集云端 hash
-        for entry in cloudManifest.files.values {
-            referencedHashes.insert(entry.hash)
+    ) async throws {
+        guard cloudManifest.version == 1 else { throw CloudSyncError.manifestCorrupted }
+        let authorized = authorizedOriginals(downloadMgr: downloadMgr)
+        let cloudFiles = cloudManifest.files.filter { path, entry in
+            authorized[path] != nil && WallhavenLibraryFilePolicy.isObjectHash(entry.hash) && entry.size >= 0
         }
-
-        // 上传
-        syncStatusMessage = t("上传文件...")
-        var totalFiles = localManifest.count
-        var processedFiles = 0
-        for (relativePath, localEntry) in localManifest {
-            let isUpload = conflictResolver.resolveFile(
-                localHash: localEntry.hash,
-                cloudHash: cloudManifest.files[relativePath]?.hash,
-                strategy: config.conflictStrategy
-            ) == .upload
-
-            if isUpload {
-                let localURL = downloadMgr.rootFolderURL.appendingPathComponent(relativePath)
-                try await uploadFile(localURL, localEntry.hash)
+        let total = max(1, localManifest.count + cloudFiles.count)
+        var processed = 0
+        for (path, entry) in localManifest {
+            try Task.checkCancellation()
+            if conflictResolver.resolveFile(localHash: entry.hash, cloudHash: cloudFiles[path]?.hash, strategy: config.conflictStrategy) == .upload,
+               let url = authorized[path] {
+                try await uploadFile(url, entry.hash)
             }
-            referencedHashes.insert(localEntry.hash)
-            processedFiles += 1
-            syncProgress = 0.2 + (Double(processedFiles) / Double(max(totalFiles, 1))) * 0.3
+            processed += 1
+            syncProgress = 0.15 + Double(processed) / Double(total) * 0.65
         }
-
-        // 下载
-        syncStatusMessage = t("下载文件...")
-        var cloudFilesToDownload: [(relativePath: String, hash: String)] = []
-        for (relativePath, cloudEntry) in cloudManifest.files {
-            let resolution = conflictResolver.resolveFile(
-                localHash: localManifest[relativePath]?.hash,
-                cloudHash: cloudEntry.hash,
-                strategy: config.conflictStrategy
-            )
-            if case .download = resolution {
-                cloudFilesToDownload.append((relativePath, cloudEntry.hash))
-            }
+        for (path, entry) in cloudFiles {
+            try Task.checkCancellation()
+            guard conflictResolver.resolveFile(localHash: localManifest[path]?.hash, cloudHash: entry.hash, strategy: config.conflictStrategy) == .download,
+                  let destination = WallhavenLibraryFilePolicy.destination(relativePath: path, root: downloadMgr.rootFolderURL) else { continue }
+            try await downloadFile(entry.hash, destination)
+            processed += 1
+            syncProgress = 0.15 + Double(processed) / Double(total) * 0.65
         }
-
-        totalFiles = cloudFilesToDownload.count
-        processedFiles = 0
-        for (relativePath, hash) in cloudFilesToDownload {
-            let destURL = downloadMgr.rootFolderURL.appendingPathComponent(relativePath)
-            try await downloadFile(hash, destURL)
-            processedFiles += 1
-            syncProgress = 0.5 + (Double(processedFiles) / Double(max(totalFiles, 1))) * 0.2
-        }
-
-        return referencedHashes
     }
 
     // MARK: - 从云端恢复（首次配置）
@@ -340,88 +234,39 @@ final class CloudSyncService: ObservableObject {
     }
 
     private func performLocalRestore() async throws {
-        guard let metadataURL = config.metadataURL,
-              let manifestURL = config.manifestURL else {
-            throw CloudSyncError.syncDirectoryNotSet
+        guard let manifestURL = config.manifestURL, let objects = config.objectsURL,
+              let metadata = try localCloudMetadata() else { throw CloudSyncError.metadataReadFailed }
+        let manifest = try await fileEngine.readManifest(from: manifestURL)
+        try metadataEngine.importMetadata(from: metadata, strategy: .cloudPreferred)
+        try await restoreFiles(manifest: manifest) { hash, url in
+            try await self.fileEngine.downloadFile(hash: hash, objectsDir: objects, destinationURL: url)
         }
-        let fileMgr = FileManager.default
-        guard fileMgr.fileExists(atPath: metadataURL.path) else {
-            throw CloudSyncError.metadataReadFailed
-        }
-
-        syncStatusMessage = t("读取文件清单...")
-        let cloudManifest = try await fileEngine.readManifest(from: manifestURL)
-        let objectsDir = config.objectsURL!
-        let downloadMgr = DownloadPathManager.shared
-        syncProgress = 0.1
-
-        syncStatusMessage = t("下载文件...")
-        var processedFiles = 0
-        let totalFiles = cloudManifest.files.count
-        for (relativePath, entry) in cloudManifest.files {
-            let destURL = downloadMgr.rootFolderURL.appendingPathComponent(relativePath)
-            try await fileEngine.downloadFile(hash: entry.hash, objectsDir: objectsDir, destinationURL: destURL)
-            processedFiles += 1
-            syncProgress = 0.1 + (Double(processedFiles) / Double(max(totalFiles, 1))) * 0.5
-        }
-        syncProgress = 0.6
-
-        syncStatusMessage = t("导入元数据...")
-        let metadataData = try Data(contentsOf: metadataURL)
-        try metadataEngine.importMetadata(from: metadataData, strategy: .cloudPreferred)
-        syncProgress = 0.9
-
-        syncStatusMessage = t("更新文件清单...")
-        let newManifest = try await scanLocalFiles(downloadMgr: downloadMgr)
-        try await fileEngine.writeManifest(
-            CloudSyncManifest(files: newManifest, updatedAt: Date()),
-            to: manifestURL
-        )
-        syncProgress = 1.0
-        syncStatusMessage = t("恢复完成")
     }
 
     private func performWebDAVRestore() async throws {
-        guard let credentials = config.webDAVCredentials else {
-            throw CloudSyncError.syncDirectoryNotSet
+        guard let credentials = config.webDAVCredentials,
+              let metadata = try await remoteCloudMetadata(credentials) else { throw CloudSyncError.metadataReadFailed }
+        let manifest = try await webDAVEngine.readManifest(baseURL: credentials.syncRootURL, credentials: credentials)
+        try metadataEngine.importMetadata(from: metadata, strategy: .cloudPreferred)
+        try await restoreFiles(manifest: manifest) { hash, url in
+            try await self.webDAVEngine.downloadFile(hash: hash, objectsBaseURL: credentials.objectsURL, destinationURL: url, credentials: credentials)
         }
-        let syncBaseURL = credentials.syncRootURL
+    }
 
-        syncStatusMessage = t("读取文件清单...")
-        let cloudManifest = try await webDAVEngine.readManifest(baseURL: syncBaseURL, credentials: credentials)
-        let objectsBaseURL = credentials.objectsURL
-        let downloadMgr = DownloadPathManager.shared
-        syncProgress = 0.1
-
-        syncStatusMessage = t("下载文件...")
-        var processedFiles = 0
-        let totalFiles = cloudManifest.files.count
-        for (relativePath, entry) in cloudManifest.files {
-            let destURL = downloadMgr.rootFolderURL.appendingPathComponent(relativePath)
-            try await webDAVEngine.downloadFile(
-                hash: entry.hash,
-                objectsBaseURL: objectsBaseURL,
-                destinationURL: destURL,
-                credentials: credentials
-            )
-            processedFiles += 1
-            syncProgress = 0.1 + (Double(processedFiles) / Double(max(totalFiles, 1))) * 0.5
+    private func restoreFiles(manifest: CloudSyncManifest, download: (String, URL) async throws -> Void) async throws {
+        guard manifest.version == 1 else { throw CloudSyncError.manifestCorrupted }
+        let manager = DownloadPathManager.shared
+        let authorized = authorizedOriginals(downloadMgr: manager)
+        let files = manifest.files.filter { path, entry in authorized[path] != nil && WallhavenLibraryFilePolicy.isObjectHash(entry.hash) && entry.size >= 0 }
+        var processed = 0
+        for (path, entry) in files {
+            try Task.checkCancellation()
+            guard let destination = WallhavenLibraryFilePolicy.destination(relativePath: path, root: manager.rootFolderURL) else { continue }
+            try await download(entry.hash, destination)
+            processed += 1
+            syncProgress = Double(processed) / Double(max(1, files.count))
         }
-        syncProgress = 0.6
-
-        syncStatusMessage = t("导入元数据...")
-        let metadataData = try await client.get(url: credentials.metadataURL, credentials: credentials)
-        try metadataEngine.importMetadata(from: metadataData, strategy: .cloudPreferred)
-        syncProgress = 0.9
-
-        syncStatusMessage = t("更新文件清单...")
-        let newManifest = try await scanLocalFiles(downloadMgr: downloadMgr)
-        try await webDAVEngine.writeManifest(
-            CloudSyncManifest(files: newManifest, updatedAt: Date()),
-            baseURL: syncBaseURL,
-            credentials: credentials
-        )
-        syncProgress = 1.0
+        syncProgress = 1
         syncStatusMessage = t("恢复完成")
     }
 
