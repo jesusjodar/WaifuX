@@ -236,8 +236,7 @@ final class LibraryCoverBackfillService {
     /// 状态文件与 `LocalImageThumbnails` 同在 `~/Library/Caches/WaifuX`：
     /// 用户清掉该缓存目录时状态一并消失，下次自然重新预热（重跑一轮命中短路，代价小）。
     private static var stateFileURL: URL {
-        FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("WaifuX/CoverBackfillCompleted.json")
+        WallpaperCachePaths.directory("WaifuX").appendingPathComponent("CoverBackfillCompleted.json")
     }
 
     private func ensurePersistedKeysLoaded() {

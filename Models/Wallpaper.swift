@@ -185,7 +185,7 @@ struct Wallpaper: Identifiable, Codable, Hashable {
         case "sfw":
             return "SFW"
         case "sketchy":
-            return "Sketchy"
+            return t("purity.sketchy.detail")
         case "nsfw":
             return "NSFW"
         default:

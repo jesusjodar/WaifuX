@@ -215,7 +215,7 @@ struct SettingsView: View {
     // MARK: 左侧导航栏
     private var sidebar: some View {
         VStack(alignment: .leading, spacing: 2) {
-            ForEach(SettingsTab.allCases.filter { $0 != .sync }, id: \.self) { tab in
+            ForEach(SettingsTab.allCases, id: \.self) { tab in
                 SidebarItem(
                     tab: tab,
                     isSelected: selectedTab == tab,

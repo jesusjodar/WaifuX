@@ -77,7 +77,8 @@ final class StatusBarController: NSObject, NSMenuDelegate {
   }
   @objc private func clicked(_ sender: NSStatusBarButton) {
     guard let event = NSApp.currentEvent else { return }
-    if event.type == .rightMouseUp {
+    let swap = WaifuXPreferences.shared.bool(forKey: "menu_bar_swap_click_actions")
+    if (event.type == .rightMouseUp) != swap {
       quickSwitcher.dismiss()
       rebuildMenu()
       statusItem?.menu = menu

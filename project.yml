@@ -166,6 +166,7 @@ targets:
     - path: Services/GlobalWallpaperSyncCoordinator.swift
     - path: Services/LibraryFolderStore.swift
     - path: Services/LocalImageThumbnailCache.swift
+    - path: Services/WallpaperCachePaths.swift
     - path: Services/LocalWallpaperApplyService.swift
     - path: Services/LocalizationService.swift
     - path: Services/WallpaperLibraryService.swift

@@ -300,19 +300,20 @@ struct WaifuXApp {
     }
 
     /// 配置 Kingfisher 高性能图片加载
-    private static func configureKingfisher() {
+    fileprivate static func configureKingfisher() {
+        KingfisherManager.shared.cache = WallpaperImageCache.shared
         // 内存缓存配置：128MB / 512 张 / 15 分钟过期 / 30 秒一次清理。
         // 探索页只显示缩略图；过高的 totalCostLimit 会让 RSS 长期顶在高位。
         // 库网格封面走独立的 LibraryCoverImageCache（LibraryGridCells.swift），
         // 不受详情页大图挤占；这里放宽过期时长，减少切页/返回后的磁盘重解码。
-        ImageCache.default.memoryStorage.config.totalCostLimit = 128 * 1024 * 1024 // 128MB
-        ImageCache.default.memoryStorage.config.countLimit = 512
-        ImageCache.default.memoryStorage.config.expiration = .seconds(15 * 60) // 15 min
-        ImageCache.default.memoryStorage.config.cleanInterval = 30             // 30s
+        WallpaperImageCache.shared.memoryStorage.config.totalCostLimit = 128 * 1024 * 1024 // 128MB
+        WallpaperImageCache.shared.memoryStorage.config.countLimit = 512
+        WallpaperImageCache.shared.memoryStorage.config.expiration = .seconds(15 * 60) // 15 min
+        WallpaperImageCache.shared.memoryStorage.config.cleanInterval = 30             // 30s
 
         // 磁盘缓存配置
-        ImageCache.default.diskStorage.config.sizeLimit = 500 * 1024 * 1024 // 500MB
-        ImageCache.default.diskStorage.config.expiration = .days(7)
+        WallpaperImageCache.shared.diskStorage.config.sizeLimit = 500 * 1024 * 1024 // 500MB
+        WallpaperImageCache.shared.diskStorage.config.expiration = .days(7)
 
         // 下载配置
         let downloader = KingfisherManager.shared.downloader
@@ -323,9 +324,9 @@ struct WaifuXApp {
         configuration.waitsForConnectivity = true
         configuration.timeoutIntervalForRequest = 60
         configuration.timeoutIntervalForResource = 180
-        configuration.httpCookieStorage = HTTPCookieStorage.shared
-        configuration.httpCookieAcceptPolicy = .always
-        configuration.httpShouldSetCookies = true
+        configuration.httpCookieStorage = BackgroundRuntimeRole.isIsolatedTest ? nil : HTTPCookieStorage.shared
+        configuration.httpCookieAcceptPolicy = BackgroundRuntimeRole.isIsolatedTest ? .never : .always
+        configuration.httpShouldSetCookies = !BackgroundRuntimeRole.isIsolatedTest
         downloader.sessionConfiguration = configuration
         downloader.downloadTimeout = 60.0
         // ⚠️ 不设置全局 .backgroundDecode：
@@ -348,7 +349,7 @@ struct WaifuXApp {
         let source = DispatchSource.makeMemoryPressureSource(eventMask: [.warning, .critical], queue: .global(qos: .utility))
         source.setEventHandler {
             // 内存紧张时清理所有内存缓存
-            ImageCache.default.clearMemoryCache()
+            WallpaperImageCache.shared.clearMemoryCache()
             LibraryCoverImageCache.imageCache.clearMemoryCache()
             Task { @MainActor in
                 LocalImageThumbnailCache.shared.clearMemoryHints()
@@ -360,12 +361,10 @@ struct WaifuXApp {
         #endif
     }
 
-    private static func makeSharedURLCache() -> URLCache {
+    fileprivate static func makeSharedURLCache() -> URLCache {
         let memoryCapacity = 50_000_000
         let diskCapacity = 500_000_000
-        let cacheDirectory = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)
-            .first?
-            .appendingPathComponent("WaifuXImageCache", isDirectory: true)
+        let cacheDirectory: URL? = WallpaperCachePaths.directory("WaifuXImageCache")
 
         if let cacheDirectory {
             do {
@@ -948,7 +947,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, @preconcur
             DisplaySelectorManager.shared.cancelForMemoryRelease()
             ForegroundPrefetchManager.shared.stopAll()
             KingfisherManager.shared.downloader.cancelAll()
-            ImageCache.default.clearMemoryCache()
+            WallpaperImageCache.shared.clearMemoryCache()
             LibraryCoverImageCache.imageCache.clearMemoryCache()
             LocalImageThumbnailCache.shared.clearMemoryHints()
             URLCache.shared.removeAllCachedResponses()
@@ -984,7 +983,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, @preconcur
         }
 
         PreviewWindowManager.shared.closePreview()
-        ImageCache.default.clearMemoryCache()
+        WallpaperImageCache.shared.clearMemoryCache()
         LibraryCoverImageCache.imageCache.clearMemoryCache()
         LocalImageThumbnailCache.shared.clearMemoryHints()
         URLCache.shared.removeAllCachedResponses()
@@ -1198,6 +1197,36 @@ private final class HelperUIExitProbeDelegate: AppDelegate {
 
     override func applicationDidFinishLaunching(_ notification: Notification) {
         installHelperQuitHandlers()
+        if ProcessInfo.processInfo.environment["WAIFUX_UI_STATIC_PREVIEW"] == "1" {
+            Self.shared = self
+            Task {
+                do {
+                    WaifuXApp.configureKingfisher()
+                    URLCache.shared = WaifuXApp.makeSharedURLCache()
+                    try await BackgroundAgentClient.shared.startIsolatedUIExitProbe()
+                    WaifuXPreferences.shared.set("es", forKey: "app_language")
+                    LocalizationService.shared.restoreSavedSettings()
+                    let preview = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1180, height: 780),
+                        styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
+                        backing: .buffered, defer: false)
+                    preview.title = "WaifuX · Prueba Wallhaven aislada"
+                    preview.isReleasedWhenClosed = false
+                    preview.delegate = self
+                    preview.contentView = EdgeToEdgeHostingView(rootView: ContentView(wallpaperViewModel: wallpaperViewModel))
+                    preview.center()
+                    window = preview
+                    NSApp.setActivationPolicy(.regular)
+                    preview.makeKeyAndOrderFront(nil)
+                    NSApp.activate(ignoringOtherApps: true)
+                    print("STATIC_UI_PREVIEW_READY")
+                    fflush(stdout)
+                } catch {
+                    print("STATIC_UI_PREVIEW_FAILED \(error.localizedDescription)")
+                    exit(1)
+                }
+            }
+            return
+        }
         let probeWindow = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 32, height: 32),
                                    styleMask: [.titled, .closable], backing: .buffered, defer: false)
         probeWindow.isReleasedWhenClosed = false

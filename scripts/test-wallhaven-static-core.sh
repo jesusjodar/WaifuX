@@ -4,6 +4,7 @@ repo_root="$(cd "$(dirname "$0")/.." && pwd)"
 test_dir="$(mktemp -d "${TMPDIR:-/tmp}/waifux-static-tests.XXXXXX")"
 trap 'rm -rf "$test_dir"' EXIT
 swiftc -parse-as-library \
+  "$repo_root/Services/WallpaperApplySupport.swift" \
   "$repo_root/Models/DisplayCropSettings.swift" \
   "$repo_root/Services/CropLayoutEngine.swift" \
   "$repo_root/Services/StaticWallpaperCropRenderer.swift" \

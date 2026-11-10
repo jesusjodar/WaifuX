@@ -1918,7 +1918,7 @@ private enum PurityFilter: String, CaseIterable, Identifiable {
     var title: String {
         switch self {
         case .sfw: return "SFW"
-        case .sketchy: return "Sketchy"
+        case .sketchy: return t("purity.sketchy.detail")
         case .nsfw: return "NSFW"
         }
     }
@@ -1961,7 +1961,7 @@ private extension WallpaperExploreContentView {
         var chips: [FilterChipData] = []
         if viewModel.currentSourceSupportsNSFW {
             if viewModel.puritySFW { chips.append(.init(kind: .purity(.sfw), title: "SFW", accentHex: "43C463")) }
-            if viewModel.puritySketchy { chips.append(.init(kind: .purity(.sketchy), title: "Sketchy", accentHex: "FFB347")) }
+            if viewModel.puritySketchy { chips.append(.init(kind: .purity(.sketchy), title: t("purity.sketchy.detail"), accentHex: "FFB347")) }
             if viewModel.purityNSFW { chips.append(.init(kind: .purity(.nsfw), title: "NSFW", accentHex: "FF5A7D")) }
         }
         if let hex = viewModel.selectedColors.first,

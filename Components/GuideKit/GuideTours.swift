@@ -97,6 +97,11 @@ enum GuideTours {
                 bodyKey: "guide.settings.scheduler.body"
             ),
             GuideStep(
+                anchor: .settingsTabSync,
+                titleKey: "guide.settings.sync.title",
+                bodyKey: "guide.settings.sync.body"
+            ),
+            GuideStep(
                 anchor: .settingsTabAbout,
                 titleKey: "guide.settings.about.title",
                 bodyKey: "guide.settings.about.body"

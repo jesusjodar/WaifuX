@@ -4,6 +4,26 @@ import CoreGraphics
 @main
 enum WallhavenStaticCoreTests {
     static func main() throws {
+        // A new selection on A invalidates an older all-display transaction,
+        // while its B ownership remains usable for rollback without reverting A.
+        var ownership = WallpaperTransitionOwnership()
+        let oldGlobal = ownership.begin(screenIDs: ["display-A", "display-B"])
+        let newerA = ownership.begin(screenIDs: ["display-A"])
+        precondition(!ownership.isCurrent(oldGlobal) && ownership.isCurrent(newerA))
+        precondition(!ownership.isCurrent(oldGlobal, screenID: "display-A"))
+        precondition(ownership.isCurrent(oldGlobal, screenID: "display-B"))
+        let newerB = ownership.begin(screenIDs: ["display-B"])
+        precondition(!ownership.isCurrent(oldGlobal, screenID: "display-B"))
+        precondition(ownership.isCurrent(newerA) && ownership.isCurrent(newerB))
+        var applyProgress = WallpaperApplyProgressState()
+        let oldApply = UUID(), newApply = UUID()
+        applyProgress.begin(oldApply)
+        applyProgress.begin(newApply)
+        precondition(!applyProgress.finish(oldApply) && applyProgress.isBlocking)
+        precondition(applyProgress.report(.committing, for: newApply))
+        precondition(!applyProgress.report(.preparing, for: newApply))
+        precondition(applyProgress.finish(newApply) && !applyProgress.isApplying)
+        print("PASS: overlapping per-display apply ownership, rollback ownership and stale UI completion")
         let space = CGColorSpace(name: CGColorSpace.sRGB)!
         let canvas = CGContext(data: nil, width: 100, height: 100, bitsPerComponent: 8,
             bytesPerRow: 400, space: space, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!

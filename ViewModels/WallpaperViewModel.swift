@@ -126,7 +126,13 @@ class WallpaperViewModel: ObservableObject {
 
     private let networkService = NetworkService.shared
     // API Key - 使用 Keychain 安全存储（优化：内存缓存 + 异步访问）
-    private let apiKeyService = "com.waifux.wallhaven.apikey"
+    private let apiKeyService: String = {
+        if BackgroundRuntimeRole.isIsolatedTest,
+           let suite = ProcessInfo.processInfo.environment["WAIFUX_HELPER_TEST_SUITE"] {
+            return suite + ".wallhaven.apikey"
+        }
+        return "com.waifux.wallhaven.apikey"
+    }()
     private let apiKeyAccount = "wallhaven_api_key"
 
     // 内存缓存，避免重复 Keychain 访问

@@ -277,6 +277,9 @@ private final class AgentApplicationDelegate: NSObject, NSApplicationDelegate {
 private enum AgentMain {
     @MainActor static func main() {
         signal(SIGPIPE, SIG_IGN)
+        if BackgroundRuntimeRole.isIsolatedTest {
+            URLCache.shared = URLCache(memoryCapacity: 8 * 1024 * 1024, diskCapacity: 0, diskPath: nil)
+        }
         if CommandLine.arguments.contains("--host-bundle-probe") { print(WaifuXHostBundle.bundleURL.path); return }
         if CommandLine.arguments.contains("--identity-probe") {
             let status = BackgroundAgentHello(protocolVersion: BackgroundAgentWire.protocolVersion, bundleIdentifier: Bundle.main.bundleIdentifier ?? "", processIdentifier: ProcessInfo.processInfo.processIdentifier, runtimeReady: false, buildIdentity: BackgroundAgentBuildIdentity.running())

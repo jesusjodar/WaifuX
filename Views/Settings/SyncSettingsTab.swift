@@ -41,7 +41,7 @@ struct SyncSettingsTab: View {
             }
 
             // MARK: 冲突策略
-            MacSettingsSection(header: t("sync.mode")) {
+            MacSettingsSection(header: t("sync.conflictStrategy")) {
                 Picker("", selection: $config.conflictStrategy) {
                     ForEach(CloudSyncConflictStrategy.allCases, id: \.self) { strategy in
                         Text(strategy.displayName).tag(strategy)
@@ -148,7 +148,7 @@ struct SyncSettingsTab: View {
         MacSettingsSection(header: t("sync.folder")) {
             MacSettingsRow(
                 title: t("sync.folder"),
-                subtitle: config.syncDirectoryURL?.path ?? t("general")
+                subtitle: config.syncDirectoryURL?.path ?? t("sync.folderNotSelected")
             ) {
                 Button(config.syncDirectoryURL != nil ? t("更改...") : t("选择...")) {
                     showDirectoryPicker = true

@@ -1260,7 +1260,7 @@ struct WallpaperDetailSheet: View {
 
     private var wallpaperTitle: String {
         let meaningfulTag = wallpaper.tags?.first(where: { !$0.name.isEmpty && $0.name.lowercased() != "wallpaper" })?.name
-        return meaningfulTag ?? "Wallpaper \(wallpaper.id.uppercased())"
+        return meaningfulTag ?? "Wallhaven \(wallpaper.id.uppercased())"
     }
 
     private var sourceLabel: String {
@@ -1338,8 +1338,7 @@ struct WallpaperDetailSheet: View {
     }
 
     private func formatFileSize(_ bytes: Int) -> String {
-        let mb = Double(bytes) / 1024 / 1024
-        return String(format: "%.0f mb", mb)
+        ByteCountFormatter.string(fromByteCount: Int64(max(0, bytes)), countStyle: .file)
     }
 
     private var detailCategoryBadge: some View {

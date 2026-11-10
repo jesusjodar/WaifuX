@@ -206,7 +206,7 @@ final class SettingsViewModel: ObservableObject {
     }
 
     func updateCacheSize() async {
-        let general = (try? await ImageCache.default.diskStorageSize) ?? 0
+        let general = (try? await WallpaperImageCache.shared.diskStorageSize) ?? 0
         let covers = (try? await LibraryCoverImageCache.imageCache.diskStorageSize) ?? 0
         let total = general + covers
         let formatter = ByteCountFormatter()
@@ -218,10 +218,10 @@ final class SettingsViewModel: ObservableObject {
     /// Only image caches owned by the current UI are cleared. Legacy media,
     /// downloaded originals, metadata and cloud objects are preserved.
     func clearCache() async {
-        ImageCache.default.clearMemoryCache()
+        WallpaperImageCache.shared.clearMemoryCache()
         LibraryCoverImageCache.imageCache.clearMemoryCache()
         LocalImageThumbnailCache.shared.clearMemoryHints()
-        await ImageCache.default.clearDiskCache()
+        await WallpaperImageCache.shared.clearDiskCache()
         await LibraryCoverImageCache.imageCache.clearDiskCache()
         URLCache.shared.removeAllCachedResponses()
         await NetworkService.shared.clearCache()

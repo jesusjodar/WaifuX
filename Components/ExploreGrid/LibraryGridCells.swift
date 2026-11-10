@@ -24,7 +24,7 @@ import Kingfisher
 ///    链路再慢也不会出现空白闪烁。
 enum LibraryCoverImageCache {
     static let imageCache: ImageCache = {
-        let cache = ImageCache(name: "library-covers")
+        let cache = WallpaperImageCache.make(name: "library-covers")
         // 中间帧出图 768px（384pt@2x，≈2.3MB/张）：512px 在 Retina 网格卡上实测偏糊。
         // 256MB 可驻约 108 张（滚动往返不驱逐重载）。处理器 identifier 含尺寸，
         // 旧尺寸条目自然失效，无需迁移。
