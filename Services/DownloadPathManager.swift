@@ -118,16 +118,6 @@ final class DownloadPathManager {
     }
 
     /// 媒体目录
-    var mediaFolderURL: URL {
-        rootFolderURL.appendingPathComponent("Media", isDirectory: true)
-    }
-
-    /// Scene 离线烘焙 MP4 目录
-    var sceneBakesFolderURL: URL {
-        rootFolderURL.appendingPathComponent("SceneBakes", isDirectory: true)
-    }
-
-    /// 静态壁纸派生文件目录（例如竖图模糊填充），不参与本地壁纸扫描。
     var derivedWallpapersFolderURL: URL {
         rootFolderURL.appendingPathComponent("DerivedWallpapers", isDirectory: true)
     }
@@ -296,8 +286,6 @@ final class DownloadPathManager {
         let directories = [
             root,
             wallpapersFolderURL,
-            mediaFolderURL,
-            sceneBakesFolderURL,
             derivedWallpapersFolderURL
         ]
         var ok = true
@@ -322,12 +310,6 @@ final class DownloadPathManager {
             }
         }
 
-        // Optimization records no longer live next to media; lift any historical
-        // adjacent sidecars out of Media / SceneBakes when the library root is ready.
-        let migrated = VideoOptimizationRecordStore.shared.migrateLegacyAdjacentSidecarsInLibraryRootsIfNeeded()
-        if migrated > 0 {
-            print("[DownloadPathManager] Migrated \(migrated) video optimization sidecars out of media folders")
-        }
         return ok
     }
 
@@ -345,8 +327,6 @@ final class DownloadPathManager {
         switch type {
         case .wallpaper:
             return wallpapersFolderURL
-        case .media:
-            return mediaFolderURL
         }
     }
 
@@ -355,14 +335,7 @@ final class DownloadPathManager {
         return wallpapersFolderURL.appendingPathComponent(fileName)
     }
 
-    func mediaFileURL(slug: String, label: String, fileExtension: String) -> URL {
-        let safeSlug = slug
-            .replacingOccurrences(of: #"[^a-zA-Z0-9\-]+"#, with: "-", options: .regularExpression)
-            .trimmingCharacters(in: CharacterSet(charactersIn: "-"))
-        let safeLabel = label.lowercased().replacingOccurrences(of: " ", with: "-")
-        let fileName = "motionbgs-\(safeSlug)-\(safeLabel).\(fileExtension)"
-        return mediaFolderURL.appendingPathComponent(fileName)
-    }
+
 
     // MARK: - 路径检测
 
@@ -372,7 +345,6 @@ final class DownloadPathManager {
 
         enum LocationType {
             case wallpapersFolder
-            case mediaFolder
             case legacyRootFolder
             case notFound
         }
@@ -387,18 +359,7 @@ final class DownloadPathManager {
         return FileLocation(url: location, foundIn: .notFound)
     }
 
-    func locateMediaFile(slug: String, label: String, fileExtension: String) -> FileLocation {
-        let safeSlug = slug
-            .replacingOccurrences(of: #"[^a-zA-Z0-9\-]+"#, with: "-", options: .regularExpression)
-            .trimmingCharacters(in: CharacterSet(charactersIn: "-"))
-        let safeLabel = label.lowercased().replacingOccurrences(of: " ", with: "-")
-        let fileName = "motionbgs-\(safeSlug)-\(safeLabel).\(fileExtension)"
-        let location = mediaFolderURL.appendingPathComponent(fileName)
-        if fileManager.fileExists(atPath: location.path) {
-            return FileLocation(url: location, foundIn: .mediaFolder)
-        }
-        return FileLocation(url: location, foundIn: .notFound)
-    }
+
 
     func locateFile(named fileName: String) -> FileLocation {
         let wallpaperLocation = wallpapersFolderURL.appendingPathComponent(fileName)
@@ -406,10 +367,8 @@ final class DownloadPathManager {
             return FileLocation(url: wallpaperLocation, foundIn: .wallpapersFolder)
         }
 
-        let mediaLocation = mediaFolderURL.appendingPathComponent(fileName)
-        if fileManager.fileExists(atPath: mediaLocation.path) {
-            return FileLocation(url: mediaLocation, foundIn: .mediaFolder)
-        }
+        let legacy = rootFolderURL.appendingPathComponent(fileName)
+        if fileManager.fileExists(atPath: legacy.path) { return FileLocation(url: legacy, foundIn: .legacyRootFolder) }
 
         let defaultURL = inferDefaultLocation(for: fileName)
         return FileLocation(url: defaultURL, foundIn: .notFound)
@@ -418,8 +377,6 @@ final class DownloadPathManager {
     private func inferDefaultLocation(for fileName: String) -> URL {
         if fileName.hasPrefix("wallhaven-") {
             return wallpapersFolderURL.appendingPathComponent(fileName)
-        } else if fileName.hasPrefix("motionbgs-") {
-            return mediaFolderURL.appendingPathComponent(fileName)
         } else {
             return rootFolderURL.appendingPathComponent(fileName)
         }

@@ -35,6 +35,7 @@ enum CloudSyncSettingsRegistry {
         [
             .init(key: "theme_mode", category: .general, valueType: .string),
             .init(key: "save_to_downloads", category: .general, valueType: .bool),
+            .init(key: "pause_rotation_on_battery", category: .general, valueType: .bool),
             .init(key: "launch_at_login", category: .general, valueType: .bool),
             .init(key: "proxy_enabled", category: .general, valueType: .bool),
             .init(key: "proxy_host", category: .general, valueType: .string),

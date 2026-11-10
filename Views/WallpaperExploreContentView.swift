@@ -263,8 +263,6 @@ struct WallpaperExploreContentView: View {
     let onPrepareCardTransition: ((CardTransitionSource?) -> Void)?
     @StateObject private var exploreAtmosphere = ExploreAtmosphereController(wallpaperMode: true)
     @ObservedObject private var arcSettings = ArcBackgroundSettings.shared
-    @ObservedObject private var sourceManager = WallpaperSourceManager.shared
-    // 注意：VideoWallpaperManager / WallpaperEngineXBridge 不在顶层观察。
     // 它们各有多个 @Published（isPaused/isMuted/volume 等），若顶层观察会导致
     // 视频壁纸暂停/恢复时整个壁纸探索页 body 重算（含瀑布流布局重计算）。
     // 仅 shouldUseLightweightEffects 依赖它们的播放状态，已下沉到
@@ -281,14 +279,6 @@ struct WallpaperExploreContentView: View {
 
     // MARK: State
     @State private var category: CategoryFilter = .all
-    @State private var fourKCategory: FourKCategory?
-    /// 与 ViewModel 持久化的 4K/Konachan 排序同步；首次出现时从 VM 恢复
-    @State private var fourKSorting: FourKSortingOption = .latest
-    @State private var konachanSorting: KonachanSorting = .dateAdded
-    @State private var konachanCategory: KonachanService.KonachanCategory?
-    @State private var konachanHotTagName: String? = nil
-    @State private var konachanDynamicHotTags: [KonachanTag] = []
-    @State private var pixivDynamicHotTags: [PixivHotTag] = []
     @State private var hotTag: HotTag?
     @State private var searchText = ""
     @State private var isLoadingMore = false
@@ -298,7 +288,6 @@ struct WallpaperExploreContentView: View {
     @State private var isFirstAppearance = true
     @State private var loadMoreFailed = false
     @State private var pendingSearchText: String?
-    @State private var isSourceMenuHovered = false
     /// 氛围图仅在实际首张 id 变化时更新
     @State private var lastSyncedFirstWallpaperID: String?
     @State private var loadMoreTask: Task<Void, Never>?
@@ -340,7 +329,6 @@ struct WallpaperExploreContentView: View {
     @State private var headerConsumedHeight: CGFloat = 0
 
     // shouldUseLightweightEffects 已下沉到 WallpaperExploreAtmosphereBackground 子视图，
-    // 该子视图自行观察 VideoWallpaperManager / WallpaperEngineXBridge 的播放状态。
 
     var body: some View {
         // 性能测量：开启 PERF_TRACE 编译标记后，会在控制台打印触发本 body 的属性来源
@@ -371,9 +359,7 @@ struct WallpaperExploreContentView: View {
     @ViewBuilder
     private var contentWithFilterObservers: some View {
         contentBase
-        .onReceive(NotificationCenter.default.publisher(for: .wallpaperDataSourceChanged)) { _ in
-            handleDataSourceChange()
-        }
+
         .onChange(of: category) { _, _ in
             handleCategoryChange()
             syncAtmosphereIfNeeded()
@@ -383,11 +369,8 @@ struct WallpaperExploreContentView: View {
                 recomputeVisibleWallpapers()
             }
         }
-        .onChange(of: fourKCategory) { _, _ in handle4KCategoryChange() }
         .onChange(of: hotTag) { _, _ in handleHotTagChange() }
         .onChange(of: viewModel.sortingOption) { _, _ in handleSortingChange() }
-        .onChange(of: fourKSorting) { _, _ in handle4KSortingChange() }
-        .onChange(of: konachanSorting) { _, _ in handleKonachanSortingChange() }
         .onChange(of: viewModel.wallpapers) { _, _ in
             handleWallpapersChanged()
         }
@@ -405,8 +388,6 @@ struct WallpaperExploreContentView: View {
                     arcSettings.compactBackground
                         .ignoresSafeArea()
                 } else {
-                    // 背景渲染下沉到独立子视图：自行观察 VideoWallpaperManager /
-                    // WallpaperEngineXBridge 的播放状态，视频壁纸暂停/恢复只重建本背景，
                     // 不触发整个壁纸探索页 body 重算（含瀑布流布局重计算）。
                     WallpaperExploreAtmosphereBackground(
                         tint: exploreAtmosphere.tint,
@@ -433,7 +414,6 @@ struct WallpaperExploreContentView: View {
     private var contentBase: some View {
         visualCore
         .onAppear {
-            syncExploreSortStateFromViewModel()
             if isFirstAppearance {
                 // 如果 viewModel 已有数据（由 ContentView.task 的 initialLoad 加载完成），
                 // 不要重置筛选，避免双重 search() 竞态
@@ -448,12 +428,6 @@ struct WallpaperExploreContentView: View {
             } else {
                 handleAppear()
             }
-        }
-        .onChange(of: viewModel.selected4KSorting) { _, newValue in
-            if fourKSorting != newValue { fourKSorting = newValue }
-        }
-        .onChange(of: viewModel.selectedKonachanSorting) { _, newValue in
-            if konachanSorting != newValue { konachanSorting = newValue }
         }
         .onChange(of: isVisible) { _, visible in
             if !visible {
@@ -536,7 +510,7 @@ struct WallpaperExploreContentView: View {
     }
 
     private var wallpaperURLSheet: some View {
-        WorkshopURLInputSheet(
+        WallhavenURLInputSheet(
             urlInput: $wallpaperURLInput,
             errorMessage: wallpaperURLError,
             isLoading: isResolvingWallpaperURL,
@@ -544,7 +518,7 @@ struct WallpaperExploreContentView: View {
             onDismiss: { showWallpaperURLSheet = false },
             title: t("通过链接打开壁纸"),
             placeholder: t("粘贴壁纸链接..."),
-            supportedFormatsHint: t("支持格式：whvn.cc/{id}、wallhaven.cc/w/{id}、4kwallpapers.com/…/{name}-{id}.html、konachan.net/post/show/{id}、pixiv.net/artworks/{id}")
+            supportedFormatsHint: "whvn.cc/{id} · wallhaven.cc/w/{id}"
         )
     }
 
@@ -602,7 +576,6 @@ struct WallpaperExploreContentView: View {
             heroSection
             hotTagsRow
             categorySection
-            pixivRelatedTagsRow
             filterSection
             activeFiltersSection
             contentHeader
@@ -753,195 +726,31 @@ struct WallpaperExploreContentView: View {
         VStack(alignment: .leading, spacing: 18) {
             headerTitle
             searchRow
-            sourceHotTagsRow
-            konachanCategoriesRow
         }
         .frame(maxWidth: 700, alignment: .leading)
     }
 
-    @ViewBuilder
-    private var sourceHotTagsRow: some View {
-        let activeSource = WallpaperSourceManager.shared.activeSource
-        
-        if activeSource == .konachan && !konachanDynamicHotTags.isEmpty {
-            // Konachan 热门标签
-            HStack(alignment: .center, spacing: 10) {
-                Text(t("hotWallpaper") + ":")
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(arcSettings.secondaryText.opacity(0.65))
 
-                ForEach(konachanDynamicHotTags) { tag in
-                    TagChip(
-                        title: KonachanService.displayName(for: tag.name),
-                        isSelected: konachanHotTagName == tag.name
-                    ) {
-                        withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
-                            if konachanHotTagName == tag.name {
-                                konachanHotTagName = nil
-                                searchText = ""
-                                viewModel.searchQuery = ""
-                            } else {
-                                konachanHotTagName = tag.name
-                                konachanCategory = nil
-                                searchText = tag.name
-                                viewModel.searchQuery = tag.name
-                            }
-                            reloadData()
-                        }
-                    }
-                }
-            }
-        } else if activeSource == .pixiv && !pixivDynamicHotTags.isEmpty {
-            // Pixiv 热门标签
-            HStack(alignment: .center, spacing: 10) {
-                Text(t("hotWallpaper") + ":")
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(arcSettings.secondaryText.opacity(0.65))
-
-                ForEach(pixivDynamicHotTags) { tag in
-                    TagChip(
-                        title: tag.name,
-                        isSelected: viewModel.searchQuery == tag.name
-                    ) {
-                        withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
-                            if viewModel.searchQuery == tag.name {
-                                searchText = ""
-                                viewModel.searchQuery = ""
-                            } else {
-                                searchText = tag.name
-                                viewModel.searchQuery = tag.name
-                            }
-                            reloadData()
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    @ViewBuilder
-    private var konachanCategoriesRow: some View {
-        if WallpaperSourceManager.shared.activeSource == .konachan {
-            // 分类（可换行，与 Wallhaven 风格一致）
-            FlowLayout(spacing: 10) {
-                ForEach(KonachanService.categories) { cat in
-                    CategoryChip(
-                        icon: cat.icon,
-                        title: cat.name,
-                        accentColors: cat.accentColors,
-                        isSelected: konachanCategory?.id == cat.id
-                    ) {
-                        withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
-                            if konachanCategory?.id == cat.id {
-                                konachanCategory = nil
-                                searchText = ""
-                                viewModel.searchQuery = ""
-                            } else {
-                                konachanCategory = cat
-                                konachanHotTagName = nil
-                                searchText = cat.query
-                                viewModel.searchQuery = cat.query
-                            }
-                            reloadData()
-                        }
-                    }
-                }
-            }
-            .padding(.vertical, 2)
-        }
-    }
 
     private var headerTitle: some View {
-        let activeSource = sourceManager.activeSource
-
-        return VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 8) {
                 Text(greetingText)
                     .font(.system(size: 14, weight: .semibold))
                     .foregroundStyle(arcSettings.secondaryText.opacity(0.85))
-
-                // 源切换 Menu（支持扩展更多源）
-                Menu {
-                    ForEach(WallpaperSourceManager.SourceType.allCases, id: \.self) { source in
-                        Button {
-                            sourceManager.switchTo(source)
-                        } label: {
-                            HStack(spacing: 8) {
-                                Text(source.displayName)
-                                    .font(.system(size: 13, weight: .semibold))
-                                if source == activeSource {
-                                    Image(systemName: "checkmark")
-                                        .font(.system(size: 11, weight: .bold))
-                                }
-                            }
-                        }
-                    }
-                } label: {
-                    Text(activeSource.displayName)
-                        .font(.system(size: 11, weight: .semibold))
-                        .foregroundStyle(arcSettings.primaryText.opacity(isSourceMenuHovered ? 0.92 : 0.78))
-                }
-                // AppKit 会缓存 Menu 的原生项；源切换后强制用新状态重新构建菜单。
-                .id(activeSource)
-                .menuStyle(.borderlessButton)
-                // macOS 26 下 borderlessButton Menu 会接受提议宽度被拉满；固定为标签固有宽度。
-                .fixedSize(horizontal: true, vertical: false)
-                .padding(.horizontal, 10)
-                .padding(.vertical, 6)
-                .liquidGlassSurface(.subtle, in: RoundedRectangle(cornerRadius: 8, style: .continuous), lightweight: true)
-                .overlay {
-                    RoundedRectangle(cornerRadius: 8, style: .continuous)
-                        .fill(Color.white.opacity(isSourceMenuHovered ? 0.055 : 0))
-                        .overlay {
-                            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                                .stroke(Color.white.opacity(isSourceMenuHovered ? 0.26 : 0.14), lineWidth: 0.5)
-                        }
-                        .allowsHitTesting(false)
-                }
-                .onHover { hovering in
-                    withAnimation(.easeOut(duration: 0.15)) {
-                        isSourceMenuHovered = hovering
-                    }
-                }
-                .offset(y: 1.5)
-                .guideAnchor(.exploreSourceMenu)
-                .sourceSwitchTooltip(key: "sourceSwitchHintShown.v1", message: t("sourceSwitchHint"))
-                .background {
-                    SourceHintIcon()
-                        .fixedSize()
-                        .frame(maxWidth: .infinity, alignment: .trailing)
-                        .offset(x: 18)
-                }
+                Text("Wallhaven")
+                    .font(.system(size: 11, weight: .semibold))
+                    .padding(.horizontal, 10).padding(.vertical, 6)
+                    .liquidGlassSurface(.subtle, in: RoundedRectangle(cornerRadius: 8), lightweight: true)
             }
-
             Text(t("wallpaperLibrary"))
                 .font(.system(size: 32, weight: .bold, design: .serif))
-                .tracking(-0.5)
-                .foregroundStyle(arcSettings.primaryText)
-                .lineLimit(1)
+                .tracking(-0.5).foregroundStyle(arcSettings.primaryText).lineLimit(1)
         }
     }
 
     private var searchRow: some View {
         HStack(spacing: 12) {
-            if WallpaperSourceManager.shared.activeSource == .konachan {
-                KonachanTagSearchField(
-                    text: $searchText,
-                    placeholder: t("search.placeholder"),
-                    tint: exploreAtmosphere.tint.primary,
-                    onSubmit: { tagName in
-                        hotTag = nil
-                        viewModel.searchQuery = tagName
-                        reloadData()
-                    },
-                    onClear: {
-                        searchText = ""
-                        viewModel.searchQuery = ""
-                        translationBridge.reset()
-                        reloadData()
-                    }
-                )
-            } else {
                 ExploreSearchBar(
                     text: $searchText,
                     placeholder: t("search.placeholder"),
@@ -952,10 +761,9 @@ struct WallpaperExploreContentView: View {
                     isTranslating: translationBridge.isTranslating,
                     onDismissTranslation: dismissTranslationAndSearchOriginal
                 )
-            }
 
             HStack(spacing: 12) {
-                WorkshopURLInputButton(tint: exploreAtmosphere.tint.primary) {
+                WallhavenURLInputButton(tint: exploreAtmosphere.tint.primary) {
                     showWallpaperURLSheet = true
                 }
 
@@ -999,9 +807,7 @@ struct WallpaperExploreContentView: View {
 
     @ViewBuilder
     private var categorySection: some View {
-        if viewModel.currentSourceSupportsCategories {
-            FlowLayout(spacing: 12) {
-                if viewModel.currentSourceSupportsWallhavenCategories {
+        FlowLayout(spacing: 12) {
                     ForEach(CategoryFilter.allCases) { cat in
                         CategoryChip(
                             icon: cat.icon,
@@ -1014,77 +820,10 @@ struct WallpaperExploreContentView: View {
                             }
                         }
                     }
-                } else if WallpaperSourceManager.shared.activeSource == .pixiv {
-                    // Pixiv 作品类型分类
-                    ForEach(PixivWorkType.allCases) { workType in
-                        PixivWorkTypeChip(
-                            workType: workType,
-                            isSelected: viewModel.selectedPixivWorkType == workType
-                        ) {
-                            withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
-                                viewModel.selectedPixivWorkType = workType
-                            }
-                            reloadData()
-                        }
-                    }
-                } else {
-                    FourKCategoryChip(
-                        category: nil,
-                        name: t("tab.all"),
-                        isSelected: fourKCategory == nil
-                    ) { fourKCategory = nil; handle4KCategoryChange() }
 
-                    ForEach(FourKWallpapersParser.categories) { cat in
-                        FourKCategoryChip(
-                            category: cat,
-                            name: t("4k.category.\(cat.id)"),
-                            isSelected: fourKCategory?.id == cat.id
-                        ) {
-                            withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
-                                fourKCategory = cat
-                            }
-                            handle4KCategoryChange()
-                        }
-                    }
-                }
-            }
-            .padding(.vertical, 2)
-        }
+        }.padding(.vertical, 2)
     }
 
-    @ViewBuilder
-    private var pixivRelatedTagsRow: some View {
-        if WallpaperSourceManager.shared.activeSource == .pixiv && !viewModel.pixivRelatedTags.isEmpty {
-            VStack(alignment: .leading, spacing: 10) {
-                Text(t("相关标签"))
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(arcSettings.secondaryText.opacity(0.46))
-                FlowLayout(spacing: 10) {
-                    ForEach(viewModel.pixivRelatedTags, id: \.self) { tag in
-                        FilterChip(
-                            title: tag,
-                            isSelected: viewModel.searchQuery == tag,
-                            tint: exploreAtmosphere.tint.primary
-                        ) {
-                            withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
-                                if viewModel.searchQuery == tag {
-                                    // 取消选择
-                                    searchText = ""
-                                    viewModel.searchQuery = ""
-                                    viewModel.pixivRelatedTags = []
-                                } else {
-                                    // 选择标签
-                                    searchText = tag
-                                    viewModel.searchQuery = tag
-                                }
-                            }
-                            reloadData()
-                        }
-                    }
-                }
-            }
-        }
-    }
 
     @ViewBuilder
     private var filterSection: some View {
@@ -1209,18 +948,7 @@ struct WallpaperExploreContentView: View {
 
             Spacer()
 
-            if viewModel.currentSourceSupportsWallhavenSorting {
-                SortMenu(options: SortingOption.allCases, selected: $viewModel.sortingOption, tint: exploreAtmosphere.tint.primary)
-            } else if WallpaperSourceManager.shared.activeSource == .konachan {
-                SortMenu(options: KonachanSorting.allCases, selected: $konachanSorting, tint: exploreAtmosphere.tint.primary)
-            } else if WallpaperSourceManager.shared.activeSource == .pixiv {
-                SortMenu(options: PixivRankingMode.allCases, selected: $viewModel.selectedPixivRankingMode, tint: exploreAtmosphere.tint.primary)
-                    .onChange(of: viewModel.selectedPixivRankingMode) { _, _ in
-                        reloadData()
-                    }
-            } else {
-                SortMenu(options: FourKSortingOption.allCases, selected: $fourKSorting, tint: exploreAtmosphere.tint.primary)
-            }
+            SortMenu(options: SortingOption.allCases, selected: $viewModel.sortingOption, tint: exploreAtmosphere.tint.primary)
         }
     }
 
@@ -1304,20 +1032,8 @@ struct WallpaperExploreContentView: View {
     }
 
     private func prepareCardTransition(at index: Int, source: CardTransitionSource?) {
-        guard visibleWallpapers.indices.contains(index), let source else {
-            onPrepareCardTransition?(nil)
-            return
-        }
-        let wallpaper = visibleWallpapers[index]
-        let ext = URL(string: wallpaper.path)?.pathExtension.lowercased() ?? ""
-        let excluded = ["gif", "apng", "mp4", "webm", "mov", "m4v"]
-        let mime = wallpaper.fileType?.lowercased() ?? ""
-        // Pixiv maps ugoira to category=anime with a JPEG preview, so the file extension alone
-        // cannot distinguish that animated work from a static illustration.
-        let isPixivAnimation = wallpaper.source == "pixiv" && wallpaper.category.lowercased() == "anime"
-        guard isVisible, !wallpaper.isPixivManga, !isPixivAnimation,
-              !["image/gif", "image/apng"].contains(mime), !mime.hasPrefix("video/"), !excluded.contains(ext),
-              source.itemID == wallpaper.id else {
+        guard isVisible, visibleWallpapers.indices.contains(index), let source,
+              source.itemID == visibleWallpapers[index].id else {
             onPrepareCardTransition?(nil)
             return
         }
@@ -1421,7 +1137,7 @@ struct WallpaperExploreContentView: View {
         gridScrollBoostToken &+= 1
     }
 
-    
+
     // MARK: - UI Components
 
     private var emptyState: some View {
@@ -1582,45 +1298,11 @@ struct WallpaperExploreContentView: View {
         }
     }
 
-    /// 把 ViewModel 已恢复的排序同步到本地 @State（4K / Konachan 菜单绑定本地状态）
-    private func syncExploreSortStateFromViewModel() {
-        if fourKSorting != viewModel.selected4KSorting {
-            fourKSorting = viewModel.selected4KSorting
-        }
-        if konachanSorting != viewModel.selectedKonachanSorting {
-            konachanSorting = viewModel.selectedKonachanSorting
-        }
-    }
 
-    private func handleDataSourceChange() {
-        if !viewModel.currentSourceSupportsNSFW {
-            viewModel.puritySFW = true
-            viewModel.puritySketchy = false
-            viewModel.purityNSFW = false
-        } else if viewModel.currentSourceRequiresAPIKeyForNSFW && !viewModel.apiKeyConfigured {
-            viewModel.purityNSFW = false
-            if !viewModel.puritySFW && !viewModel.puritySketchy {
-                viewModel.puritySFW = true
-            }
-        }
-        fourKCategory = nil
-        // 切换源时保留用户持久化过的各源排序，仅同步 UI 绑定
-        syncExploreSortStateFromViewModel()
-        konachanCategory = nil
-        konachanHotTagName = nil
-        category = .all
-        if WallpaperSourceManager.shared.activeSource == .konachan {
-            loadKonachanHotTags()
-        } else if WallpaperSourceManager.shared.activeSource == .pixiv {
-            loadPixivHotTags()
-        }
-        // 数据源切换时必须清空旧数据，避免新旧源内容混在一起显示
-        viewModel.wallpapers.removeAll()
-        reloadData()
-    }
+
+
 
     private func handleDefaultFilterSettingsChange() {
-        guard WallpaperSourceManager.shared.activeSource == .wallhaven else { return }
         reloadData()
     }
 
@@ -1646,10 +1328,7 @@ struct WallpaperExploreContentView: View {
         reloadData()
     }
 
-    private func handle4KCategoryChange() {
-        viewModel.selected4KCategorySlug = fourKCategory?.id
-        reloadData()
-    }
+
 
     private func handleHotTagChange() {
         if let tag = hotTag {
@@ -1667,48 +1346,13 @@ struct WallpaperExploreContentView: View {
         reloadData()
     }
 
-    private func handle4KSortingChange() {
-        // 与 ViewModel 同步时不要重复写回/重载
-        guard viewModel.selected4KSorting != fourKSorting else { return }
-        AppLogger.info(.wallpaper, "4K 排序方式变化", metadata: ["排序": fourKSorting.rawValue])
-        viewModel.selected4KSorting = fourKSorting
-        reloadData()
-    }
 
-    private func handleKonachanSortingChange() {
-        guard viewModel.selectedKonachanSorting != konachanSorting else { return }
-        AppLogger.info(.wallpaper, "Konachan 排序方式变化", metadata: ["排序": konachanSorting.rawValue])
-        viewModel.selectedKonachanSorting = konachanSorting
-        reloadData()
-    }
 
-    private func loadKonachanHotTags() {
-        guard WallpaperSourceManager.shared.activeSource == .konachan else { return }
-        Task {
-            do {
-                let tags = try await KonachanService.shared.fetchHotTags(limit: 6)
-                await MainActor.run {
-                    self.konachanDynamicHotTags = tags
-                }
-            } catch {
-                print("[KonachanHotTags] failed: \(error)")
-            }
-        }
-    }
-    
-    private func loadPixivHotTags() {
-        guard WallpaperSourceManager.shared.activeSource == .pixiv else { return }
-        Task {
-            do {
-                let tags = try await PixivService.shared.fetchHotTags(limit: 6)
-                await MainActor.run {
-                    self.pixivDynamicHotTags = tags
-                }
-            } catch {
-                print("[PixivHotTags] failed: \(error)")
-            }
-        }
-    }
+
+
+
+
+
 
     private func triggerLoadMore() {
         guard viewModel.hasMorePages else {
@@ -1869,8 +1513,6 @@ struct WallpaperExploreContentView: View {
         translationBridge.reset()
         viewModel.searchQuery = ""
         category = .all
-        fourKCategory = nil
-        viewModel.selected4KCategorySlug = nil
         hotTag = nil
         viewModel.puritySFW = true
         viewModel.puritySketchy = false
@@ -1904,11 +1546,9 @@ struct WallpaperExploreContentView: View {
         let start = Date()
         let newVisible: [Wallpaper]
         if viewModel.currentSourceSupportsWallhavenCategories {
-            let hidePortrait = WallpaperSourceManager.shared.activeSource == .wallhaven
-                && WallhavenBrowsePreferences.hidePortraitByDefault()
+            let hidePortrait = WallhavenBrowsePreferences.hidePortraitByDefault()
                 && viewModel.selectedRatios.isEmpty
-            let hidePeople = WallpaperSourceManager.shared.activeSource == .wallhaven
-                && category == .all
+            let hidePeople = category == .all
                 && WallhavenBrowsePreferences.hidePeopleByDefault()
             newVisible = viewModel.wallpapers.filter { wallpaper in
                 matchesCategory(wallpaper, category: category)
@@ -2005,8 +1645,6 @@ struct WallpaperExploreContentView: View {
 }
 
 // MARK: - 壁纸探索页氛围背景（独立观察视频壁纸播放状态）
-/// 从 WallpaperExploreContentView 下沉而来：自行观察 VideoWallpaperManager /
-/// WallpaperEngineXBridge，仅当播放状态变化时重建本背景视图，避免整个壁纸探索页
 /// body 重算（含瀑布流布局重计算）。
 private struct WallpaperExploreAtmosphereBackground: View {
     let tint: ExploreAtmosphereTint
@@ -2015,24 +1653,19 @@ private struct WallpaperExploreAtmosphereBackground: View {
     let dotGridOpacity: Double
     let grainIntensity: Double
 
-    @ObservedObject private var videoWallpaperManager = VideoWallpaperManager.shared
-    @ObservedObject private var wallpaperEngineBridge = WallpaperEngineXBridge.shared
 
     /// 动态壁纸正在播放时启用轻量特效，降低 GPU/WindowServer 压力
-    private var shouldUseLightweightEffects: Bool {
-        (videoWallpaperManager.isVideoWallpaperActive && !videoWallpaperManager.isPaused) ||
-        (wallpaperEngineBridge.isControllingExternalEngine && !wallpaperEngineBridge.isExternalPaused)
-    }
+
 
     var body: some View {
         ArcAtmosphereBackground(
             tint: tint,
-            referenceImage: shouldUseLightweightEffects ? nil : referenceImage,
+            referenceImage: referenceImage,
             isLightMode: isLightMode,
             dotGridOpacity: dotGridOpacity,
             useNoise: true,
             grainIntensity: grainIntensity,
-            lightweight: shouldUseLightweightEffects
+            lightweight: false
         )
         // 把多层渐变+点阵+噪点合并成一个 Metal 纹理，减少 WindowServer 合成层数
         .drawingGroup(opaque: true)
@@ -2362,7 +1995,6 @@ private extension WallpaperExploreContentView {
     }
 
     func togglePurity(_ filter: PurityFilter) {
-        // Wallhaven 的 NSFW 需要 API Key；Konachan 使用自己的分级与会话。
         if filter.requiresAPIKey
             && viewModel.currentSourceRequiresAPIKeyForNSFW
             && !viewModel.apiKeyConfigured {
@@ -2525,52 +2157,8 @@ private struct ActiveFilterChip: View {
     }
 }
 
-// MARK: - 4K Category Chip
 
-private struct FourKCategoryChip: View {
-    let category: FourKCategory?
-    let name: String
-    let isSelected: Bool
-    let action: () -> Void
-    @State private var isHovered = false
 
-    private var iconName: String { category?.icon ?? "sparkles" }
-    private var gradientColors: [String] { category?.accentColors ?? ["FF9B58", "F54E42"] }
-
-    var body: some View {
-        Button(action: action) {
-            HStack(spacing: 8) {
-                ZStack {
-                    Circle()
-                        .fill(LinearGradient(colors: gradientColors.map(Color.init(hex:)), startPoint: .topLeading, endPoint: .bottomTrailing))
-                        .frame(width: 22, height: 22)
-                    Image(systemName: iconName).font(.system(size: 10, weight: .bold)).foregroundStyle(isSelected ? .white : .black.opacity(0.78))
-                }
-                .overlay(Circle().stroke(Color.white.opacity(isSelected ? 0.18 : 0.08), lineWidth: 1))
-
-                Text(name).font(.system(size: 13, weight: .semibold)).foregroundStyle(ArcBackgroundSettings.shared.primaryText.opacity(isSelected ? 0.96 : 0.84)).lineLimit(1)
-            }
-            .padding(.horizontal, 10)
-            .frame(height: 34)
-            .background(
-                ZStack {
-                    Capsule(style: .continuous).fill(.ultraThinMaterial)
-                    if let accentColor = gradientColors.first {
-                        Capsule(style: .continuous).fill(Color(hex: accentColor).opacity(isSelected ? 0.15 : 0.08))
-                    }
-                }
-            )
-            .overlay(
-                Capsule(style: .continuous)
-                    .stroke((gradientColors.first.map { Color(hex: $0) } ?? Color(hex: "FF9B58")).opacity(isSelected ? 0.35 : 0.15), lineWidth: 0.5)
-            )
-        }
-        .buttonStyle(.plain)
-        .scaleEffect(isHovered && !isSelected ? 1.02 : 1.0)
-        .animation(AppFluidMotion.hoverEase, value: isHovered)
-        .onHover { isHovered = $0 }
-    }
-}
 
 // MARK: - Extensions
 
@@ -2593,53 +2181,4 @@ extension SortingOption: CaseIterable, SortOptionProtocol, Identifiable {
     }
 
     public var menuTitle: String { title }
-}
-
-
-
-// MARK: - FourKSortingOption Extension
-
-extension FourKSortingOption: SortOptionProtocol {
-    public var title: String { displayName }
-    public var menuTitle: String { displayName }
-}
-
-// MARK: - KonachanSorting Extension
-
-extension KonachanSorting: SortOptionProtocol {
-    public var id: String { rawValue }
-
-    public var title: String {
-        switch self {
-        case .dateAdded: return t("sort.latest")
-        case .score: return t("sort.toplist")
-        case .tagcount: return "Tags"
-        case .landscape: return "Landscape"
-        case .portrait: return "Portrait"
-        case .random: return t("sort.random")
-        case .mpixels: return "Resolution"
-        }
-    }
-
-    public var menuTitle: String { title }
-}
-
-// MARK: - Pixiv Extensions
-
-extension PixivRankingMode: SortOptionProtocol {
-    public var id: String { rawValue }
-    public var title: String { displayName }
-    public var menuTitle: String { displayName }
-}
-
-extension PixivSearchSort: SortOptionProtocol {
-    public var id: String { rawValue }
-    public var title: String { displayName }
-    public var menuTitle: String { displayName }
-}
-
-extension PixivWorkType: SortOptionProtocol {
-    public var id: String { rawValue }
-    public var title: String { displayName }
-    public var menuTitle: String { displayName }
 }

@@ -26,7 +26,8 @@ struct DisplaySelectorSheet: View {
   /// 根据 ID 获取对应的屏幕
   private func screen(forID id: String?) -> NSScreen? {
     guard let id = id else { return nil }
-    return screens.first { $0.wallpaperScreenFingerprint == id }
+    let matches = screens.filter { $0.wallpaperScreenFingerprint == id }
+    return matches.count == 1 ? matches[0] : nil
   }
 
   var body: some View {
@@ -79,7 +80,7 @@ struct DisplaySelectorSheet: View {
           }
 
           // 单个显示器选项
-          ForEach(Array(screens.enumerated()), id: \.element.screenIdentifier) { index, screen in
+          ForEach(Array(screens.enumerated()), id: \.element.wallpaperScreenIdentifier) { index, screen in
             DisplayOptionButton(
               icon: "display",
               title: "\(t("display")) \(index + 1)",

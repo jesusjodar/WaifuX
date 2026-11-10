@@ -6,6 +6,7 @@ trap 'rm -rf "$test_dir"' EXIT
 swiftc -swift-version 6 -D WAIFUX_HELPER -parse-as-library \
   "$repo_root/Models/Wallpaper.swift" "$repo_root/Models/FavoriteSource.swift" \
   "$repo_root/Models/WallhavenAPI.swift" "$repo_root/Models/WallhavenContentPolicy.swift" \
+  "$repo_root/Models/MenuBarQuickWallpaperItem.swift" \
   "$repo_root/Models/DownloadTask.swift" "$repo_root/Utilities/LegacyRecordReader.swift" \
   "$repo_root/BackgroundAgent/BackgroundRuntimeRole.swift" \
   "$repo_root/BackgroundAgent/BackgroundAgentWire.swift" \

@@ -69,6 +69,19 @@ enum AppLogger {
     static func main() async throws {
         let suite = ProcessInfo.processInfo.environment["WAIFUX_HELPER_TEST_SUITE"]!
         defer { UserDefaults.standard.removePersistentDomain(forName: suite) }
+        precondition(Wallpaper.normalizedImageURL(from: "https://pixiv.net/image.jpg") == nil)
+        precondition(Wallpaper.normalizedImageURL(from: "http://th.wallhaven.cc/lg/aa/aa0001.jpg") == nil)
+        precondition(Wallpaper.normalizedImageURL(from: "//th.wallhaven.cc/lg/aa/aa0001.jpg")?.host == "th.wallhaven.cc")
+        let index = MenuBarQuickIndex.build([
+            MenuBarQuickIndexEntry(id: "hidden", path: "/library/secret.jpg", folderKey: "private", downloadedAt: .now, visible: false),
+            MenuBarQuickIndexEntry(id: "visible", path: "/library/original.jpg", folderKey: "chosen", downloadedAt: .now, visible: true)
+        ])
+        precondition(index.owner(of: "/library/secret.jpg") == nil)
+        precondition(index.owner(of: "/library/original.jpg") == "visible")
+        precondition(index.owner(of: "/library") == nil)
+        precondition(index.owner(of: "/tmp/foreign-provider.jpg") == nil)
+        precondition(index.sample(folderIDs: ["chosen"], excluding: [], limit: 16) == ["visible"])
+        precondition(index.sample(folderIDs: ["private"], excluding: [], limit: 16).isEmpty)
         let mode = CommandLine.arguments[1]
         let queue = PersistentDownloadQueueService.shared
         let model = WallpaperViewModel()

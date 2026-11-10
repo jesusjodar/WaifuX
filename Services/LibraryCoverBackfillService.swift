@@ -1,20 +1,7 @@
 import Foundation
 
-/// 「我的库」封面后台预热。
-///
-/// 历史条目（旧版烘焙、缓存被清理、迁移来的记录）第一次进库时没有磁盘封面，
-/// 只能靠 cell 滚停后现场抽帧，整屏会连续解码多路视频。本服务在库页可见且空闲时，
-/// 把当前列表里缺封面的条目按条补齐到本机 SSD 缓存，下次进库直接命中：
-///
-/// - 媒体：复用 `MediaItem.ensureFolderPreviewCache`（烘焙列表帧 / 视频抽帧 / 静图小图 / Workshop preview）
-/// - 壁纸：只补静图 512 缩略图（GIF 保留原文件给 hover；视频不在壁纸列表封面链路里）
-///
-/// 约束（对齐库网格既有性能纪律）：
-/// - 串行、逐条限速；每轮有「条数 + 时长」双上限，到点停轮，下次进库继续
-/// - 滚动中暂停（`LibraryScrollHoverGate`）；低电量 / 可回收内存不足时停轮
-/// - 页面离开即取消；已确认条目不再重复排队，且该集合跨进程落盘
-///   （`~/Library/Caches/WaifuX/CoverBackfillCompleted.json`），重启 App 不再全量重跑
-/// - 不发起任何网络请求，只处理本机已有文件与烘焙产物
+/// Prepares local thumbnails for registered Wallhaven images while the library
+/// is idle. Original images are never modified; queue and memory bounds remain.
 @MainActor
 final class LibraryCoverBackfillService {
     static let shared = LibraryCoverBackfillService()
@@ -22,19 +9,16 @@ final class LibraryCoverBackfillService {
     struct Candidate {
         enum Kind {
             case wallpaper
-            case media
         }
 
         let id: String
         let kind: Kind
         let localFileURL: URL?
-        let mediaItem: MediaItem?
 
-        init(id: String, kind: Kind, localFileURL: URL?, mediaItem: MediaItem? = nil) {
+        init(id: String, kind: Kind, localFileURL: URL?) {
             self.id = id
             self.kind = kind
             self.localFileURL = localFileURL
-            self.mediaItem = mediaItem
         }
     }
 
@@ -230,34 +214,20 @@ final class LibraryCoverBackfillService {
         case .wallpaper:
             guard let local = candidate.localFileURL,
                   local.isFileURL,
-                  LocalImageThumbnailCache.isRasterImageFile(local) else { return .structural }
+                  LocalImageThumbnailCache.isRasterImageFile(local),
+                  let record = WallpaperLibraryService.shared.downloadRecord(for: candidate.id),
+                  record.localFileURL.standardizedFileURL == local.standardizedFileURL else { return .structural }
             guard FileManager.default.isReadableFile(atPath: local.path) else { return .softFailed }
             let generated = await LocalImageThumbnailCache.shared.ensureThumbnail(forLocalFile: local)
             return generated == nil ? .softFailed : .filled
 
-        case .media:
-            guard let item = candidate.mediaItem else { return .structural }
-            // 烘焙产物在外置盘时先探可读，避免拔盘场景把整批误标成永久完成。
-            if let bakedPath = MediaLibraryService.shared
-                .downloadRecord(for: item.id)?.sceneBakeArtifact?.videoPath,
-               !bakedPath.isEmpty {
-                guard FileManager.default.isReadableFile(atPath: bakedPath) else { return .softFailed }
-            } else {
-                // `ensureFolderPreviewCache` 对「无烘焙产物且无本地文件」直接返回 false，
-                // 这是结构性失败，先在这里判掉。
-                guard let local = candidate.localFileURL, local.isFileURL else { return .structural }
-                guard FileManager.default.isReadableFile(atPath: local.path) else { return .softFailed }
-            }
-            // 返回 false = 命中已有缓存（或结构上无事可做，如 GIF），均视为已处理。
-            _ = await item.ensureFolderPreviewCache(localFileURL: candidate.localFileURL)
-            return .filled
+
         }
     }
 
     private static func key(for candidate: Candidate) -> String {
         switch candidate.kind {
         case .wallpaper: return "wallpaper:\(candidate.id)"
-        case .media: return "media:\(candidate.id)"
         }
     }
 

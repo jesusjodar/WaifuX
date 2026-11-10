@@ -645,7 +645,7 @@ private struct TopBarSegmentedControl: View {
     var body: some View {
         HStack(spacing: 6) {
             // 仅显示启动快照启用的 tab（home/myMedia 永远显示；三个 Explore 受功能模块开关门控）
-            ForEach(MainTab.allCases.filter { ModuleAvailability.shared.isTabEnabled($0) }, id: \.self) { tab in
+            ForEach(MainTab.allCases, id: \.self) { tab in
                 Button {
                     withAnimation(.spring(response: 0.28, dampingFraction: 0.84)) {
                         selectedTab = tab

@@ -44,8 +44,6 @@ class WallpaperSchedulerViewModel: ObservableObject {
                 isEnabled: config.isEnabled,
                 intervalMinutes: minutes,
                 order: config.order,
-                includeWallpapers: config.includeWallpapers,
-                includeMedia: config.includeMedia,
                 displayConfigs: config.displayConfigs,
                 isGlobalDisplaySyncEnabled: config.isGlobalDisplaySyncEnabled,
                 globalDisplayConfig: config.globalDisplayConfig
@@ -59,8 +57,6 @@ class WallpaperSchedulerViewModel: ObservableObject {
                 isEnabled: config.isEnabled,
                 intervalMinutes: config.intervalMinutes,
                 order: order,
-                includeWallpapers: config.includeWallpapers,
-                includeMedia: config.includeMedia,
                 displayConfigs: config.displayConfigs,
                 isGlobalDisplaySyncEnabled: config.isGlobalDisplaySyncEnabled,
                 globalDisplayConfig: config.globalDisplayConfig
@@ -68,35 +64,9 @@ class WallpaperSchedulerViewModel: ObservableObject {
         )
     }
 
-    func updateIncludeWallpapers(_ include: Bool) {
-        schedulerService.updateConfig(
-            SchedulerConfig(
-                isEnabled: config.isEnabled,
-                intervalMinutes: config.intervalMinutes,
-                order: config.order,
-                includeWallpapers: include,
-                includeMedia: config.includeMedia,
-                displayConfigs: config.displayConfigs,
-                isGlobalDisplaySyncEnabled: config.isGlobalDisplaySyncEnabled,
-                globalDisplayConfig: config.globalDisplayConfig
-            )
-        )
-    }
 
-    func updateIncludeMedia(_ include: Bool) {
-        schedulerService.updateConfig(
-            SchedulerConfig(
-                isEnabled: config.isEnabled,
-                intervalMinutes: config.intervalMinutes,
-                order: config.order,
-                includeWallpapers: config.includeWallpapers,
-                includeMedia: include,
-                displayConfigs: config.displayConfigs,
-                isGlobalDisplaySyncEnabled: config.isGlobalDisplaySyncEnabled,
-                globalDisplayConfig: config.globalDisplayConfig
-            )
-        )
-    }
+
+
 
     // MARK: - Per-Display Config
 
@@ -125,21 +95,15 @@ class WallpaperSchedulerViewModel: ObservableObject {
         schedulerService.updateDisplayOrder(order, for: screenID)
     }
 
-    func updateDisplayIncludeWallpapers(_ include: Bool, for screenID: String) {
-        schedulerService.updateDisplayIncludeWallpapers(include, for: screenID)
-    }
 
-    func updateDisplayIncludeMedia(_ include: Bool, for screenID: String) {
-        schedulerService.updateDisplayIncludeMedia(include, for: screenID)
-    }
+
+
 
     func updateDisplayFolderIDs(_ folderIDs: [String]?, for screenID: String) {
         schedulerService.updateDisplayFolderIDs(folderIDs, for: screenID)
     }
 
-    func updateDisplayWebSceneSwitchSeconds(_ seconds: Int?, for screenID: String) {
-        schedulerService.updateDisplayWebSceneSwitchSeconds(seconds, for: screenID)
-    }
+
 
     // MARK: - Global Display Sync
 
@@ -167,21 +131,15 @@ class WallpaperSchedulerViewModel: ObservableObject {
         schedulerService.updateGlobalDisplayOrder(order)
     }
 
-    func updateGlobalDisplayIncludeWallpapers(_ include: Bool) {
-        schedulerService.updateGlobalDisplayIncludeWallpapers(include)
-    }
 
-    func updateGlobalDisplayIncludeMedia(_ include: Bool) {
-        schedulerService.updateGlobalDisplayIncludeMedia(include)
-    }
+
+
 
     func updateGlobalDisplayFolderIDs(_ folderIDs: [String]?) {
         schedulerService.updateGlobalDisplayFolderIDs(folderIDs)
     }
 
-    func updateGlobalDisplayWebSceneSwitchSeconds(_ seconds: Int?) {
-        schedulerService.updateGlobalDisplayWebSceneSwitchSeconds(seconds)
-    }
+
 
     // MARK: - Computed Properties
 
@@ -190,11 +148,9 @@ class WallpaperSchedulerViewModel: ObservableObject {
     }
 
     func intervalLabel(for minutes: Int) -> String {
-        if minutes == SchedulerConfig.intervalOnEndMinutes {
-            return "Play to End"
-        }
+
         if minutes == SchedulerConfig.intervalOnUnlockMinutes {
-            return "Change on Unlock"
+            return t("intervalOnUnlock")
         }
         switch minutes {
         case 1: return "1 min"
@@ -211,8 +167,8 @@ class WallpaperSchedulerViewModel: ObservableObject {
 
     var orderLabel: String {
         switch config.order {
-        case .sequential: return "Sequential"
-        case .random: return "Random"
+        case .sequential: return t("sequential")
+        case .random: return t("random")
         }
     }
 }

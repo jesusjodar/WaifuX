@@ -26,7 +26,9 @@ final class WallpaperSchedulerService: ObservableObject {
   private var unlockToken: NSObjectProtocol?
   private var isStopping = false
   private var isStarted = false
-  private var manualApplyInFlight = false
+  private var manualApplyLeases = Set<UUID>()
+  private var manualApplyPreparation: Task<Void, Never>?
+  private var manualApplyInFlight: Bool { !manualApplyLeases.isEmpty }
   private var didRestore = false
 
   private init() {
@@ -153,6 +155,7 @@ final class WallpaperSchedulerService: ObservableObject {
       !BackgroundRuntimeRole.isIsolatedTest
     else { return }
     restoreSavedConfig()
+    PowerSourceMonitor.shared.startMonitoring()
     isStarted = true
     if subscriptions.isEmpty {
       for publisher in [
@@ -182,6 +185,12 @@ final class WallpaperSchedulerService: ObservableObject {
         ) { [weak self] _ in
           Task { @MainActor in self?.tick() }
         })
+      notificationTokens.append(
+        NotificationCenter.default.addObserver(
+          forName: .powerSourceDidChange, object: nil, queue: .main
+        ) { [weak self] _ in
+          Task { @MainActor in self?.reevaluateBatteryPolicy() }
+        })
       unlockToken = DistributedNotificationCenter.default().addObserver(
         forName: NSNotification.Name("com.apple.screenIsUnlocked"), object: nil, queue: .main
       ) { [weak self] _ in
@@ -196,6 +205,7 @@ final class WallpaperSchedulerService: ObservableObject {
       return
     }
     isStarted = false
+    PowerSourceMonitor.shared.stopMonitoring()
     timer?.cancel()
     timer = nil
     cancelRotations()
@@ -206,6 +216,15 @@ final class WallpaperSchedulerService: ObservableObject {
     stop()
     GlobalWallpaperSyncCoordinator.shared.prepareForProcessExit()
     persist()
+  }
+  private var shouldPauseAutomaticRotation: Bool {
+    (WaifuXPreferences.shared.object(forKey: "pause_rotation_on_battery") as? Bool ?? true)
+      && PowerSourceMonitor.shared.isOnBatteryPower
+  }
+  func reevaluateBatteryPolicy() {
+    guard BackgroundRuntimeRole.isHelper else { return }
+    if shouldPauseAutomaticRotation { cancelRotations() }
+    scheduleTimer()
   }
   private func cancelRotations() {
     for task in rotations.values { task.cancel() }
@@ -227,7 +246,7 @@ final class WallpaperSchedulerService: ObservableObject {
   private func scheduleTimer() {
     timer?.cancel()
     timer = nil
-    guard isStarted, !isStopping, !manualApplyInFlight, BackgroundRuntimeRole.isHelper else {
+    guard isStarted, !isStopping, !manualApplyInFlight, !shouldPauseAutomaticRotation, BackgroundRuntimeRole.isHelper else {
       isRunning = false
       return
     }
@@ -248,7 +267,7 @@ final class WallpaperSchedulerService: ObservableObject {
     timer.resume()
   }
   private func tick() {
-    guard !isStopping, !manualApplyInFlight else { return }
+    guard !isStopping, !manualApplyInFlight, !shouldPauseAutomaticRotation else { return }
     for (key, screens, policy) in policies() where policy.isEnabled && !policy.isOnUnlockMode {
       // An untouched schedule starts its interval now, rather than
       // moving the deadline on every timer or library notification.
@@ -261,7 +280,7 @@ final class WallpaperSchedulerService: ObservableObject {
     scheduleTimer()
   }
   private func unlocked() {
-    guard !manualApplyInFlight, !isStopping else { return }
+    guard !manualApplyInFlight, !isStopping, !shouldPauseAutomaticRotation else { return }
     for (key, screens, policy) in policies() where policy.isEnabled && policy.isOnUnlockMode {
       rotate(key: key, screens: screens, policy: policy)
     }
@@ -304,6 +323,7 @@ final class WallpaperSchedulerService: ObservableObject {
     previousID: String? = nil, manual: Bool = false
   ) {
     guard !isStopping, !manualApplyInFlight else { return }
+    guard manual || !shouldPauseAutomaticRotation else { return }
     if manual { rotations[key]?.cancel() } else if rotations[key] != nil { return }
     let id = UUID()
     rotationIDs[key] = id
@@ -408,28 +428,28 @@ final class WallpaperSchedulerService: ObservableObject {
       policy: policy, previousID: previous, manual: true)
     return true
   }
-  func beginManualWallpaperApply() async {
-    if BackgroundRuntimeRole.isRemoteUI {
-      _ = try? await BackgroundRuntimeBridge.request("scheduler.beginManualApply")
-      return
+  /// Helper-owned leases are always released by the apply service's defer.
+  func beginManualWallpaperApply() async -> UUID {
+    let lease = UUID()
+    manualApplyLeases.insert(lease)
+    if manualApplyPreparation == nil {
+      let pending = Array(rotations.values)
+      cancelRotations()
+      manualApplyPreparation = Task { @MainActor in
+        for task in pending { await task.value }
+        await GlobalWallpaperSyncCoordinator.shared.drainBeforeLeavingGlobalMode()
+      }
     }
-    manualApplyInFlight = true
-    let pending = Array(rotations.values)
-    cancelRotations()
-    for task in pending { await task.value }
-    await GlobalWallpaperSyncCoordinator.shared.drainBeforeLeavingGlobalMode()
+    await manualApplyPreparation?.value
     scheduleTimer()
+    return lease
   }
-  func completeManualWallpaperApply(success: Bool, screenIDs: Set<String>) {
-    if BackgroundRuntimeRole.isRemoteUI {
-      BackgroundRuntimeBridge.send(
-        "scheduler.completeManualApply", ["success": success, "screenIDs": screenIDs])
-      return
-    }
-    manualApplyInFlight = false
+  func completeManualWallpaperApply(lease: UUID, success: Bool, screenIDs: Set<String>, itemID: String?) {
+    guard manualApplyLeases.remove(lease) != nil else { return }
+    if manualApplyLeases.isEmpty { manualApplyPreparation = nil }
     if success {
-      for screen in NSScreen.screens where screenIDs.contains(screen.wallpaperScreenIdentifier) {
-        suppressAutoSwitch(forScreen: screen)
+      for screenID in screenIDs {
+        notifyManualWallpaperChange(screenID: screenID, itemID: itemID)
       }
     }
     scheduleTimer()

@@ -344,27 +344,15 @@ struct Wallpaper: Identifiable, Codable, Hashable {
         return nil
     }
 
-    /// 内部（含 ExploreGrid 网格 cell）共用的 URL 规范化：`//` 补 https、`/` 视为本地路径、
-    /// 仅接受 http/https/file。
+    /// Network previews use Wallhaven hosts. Local originals remain available
+    /// for verified legacy records and the downloaded-image library.
     static func normalizedImageURL(from value: String) -> URL? {
-        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return nil }
-
-        if trimmed.hasPrefix("//") {
-            return URL(string: "https:" + trimmed)
-        }
-
-        if trimmed.hasPrefix("/") {
-            return URL(fileURLWithPath: trimmed)
-        }
-
-        guard let parsed = URL(string: trimmed),
-              let scheme = parsed.scheme?.lowercased(),
-              ["http", "https", "file"].contains(scheme) else {
-            return nil
-        }
-
-        return parsed
+        let value = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !value.isEmpty else { return nil }
+        if value.hasPrefix("//") { return WallhavenContentPolicy.imageURL("https:" + value) }
+        if value.hasPrefix("/") { return URL(fileURLWithPath: value) }
+        guard let url = URL(string: value) else { return nil }
+        return url.isFileURL ? url : WallhavenContentPolicy.imageURL(value)
     }
 
     private static func deduplicatedURLs(_ urls: [URL?]) -> [URL] {

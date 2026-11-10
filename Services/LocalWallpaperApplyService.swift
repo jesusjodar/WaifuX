@@ -36,6 +36,25 @@ enum LocalWallpaperApplyService {
             "options": try JSONEncoder().encode(options),
           ])["success"] as? Bool) ?? false
     }
+    let scheduler = WallpaperSchedulerService.shared
+    let isManual = options.reason != "static-rotation" && options.reason != "static-recovery" && !options.isGlobalTransaction
+    let lease = isManual ? await scheduler.beginManualWallpaperApply() : nil
+    let screens = scheduler.isGlobalDisplaySyncEnabled ? NSScreen.screens : (targetScreens ?? NSScreen.screens)
+    var success = false
+    defer {
+      if let lease {
+        scheduler.completeManualWallpaperApply(
+          lease: lease, success: success,
+          screenIDs: Set(screens.map(\.wallpaperScreenIdentifier)),
+          itemID: WallpaperLibraryService.shared.downloadRecord(forLocalFilePath: localURL.path)?.wallpaper.id)
+      }
+    }
+    try Task.checkCancellation()
+    if scheduler.isGlobalDisplaySyncEnabled && !options.isGlobalTransaction {
+      success = try await GlobalWallpaperSyncCoordinator.shared.apply(
+        localURL: localURL, options: options, onStageChange: onStageChange)
+      return success
+    }
     guard localURL.isFileURL, FileManager.default.fileExists(atPath: localURL.path) else {
       throw ApplyError.missingFile(localURL.path)
     }
@@ -46,6 +65,7 @@ enum LocalWallpaperApplyService {
     try await StaticWallpaperApplyService.apply(
       from: localURL, option: .desktop, targetScreens: targetScreens, requestToken: token)
     onStageChange?(.committing)
+    success = true
     return true
   }
 }

@@ -18,7 +18,6 @@ final class PreviewWindowManager: ObservableObject {
         removeCloseObserver()
         if let window = windowController?.window {
             // 主动断开 hosting view，确保 SwiftUI 视图树立即销毁
-            // (PreviewPlayer @StateObject 走 deinit → AVPlayer 停播)
             window.contentView = nil
         }
         windowController?.close()
@@ -33,7 +32,7 @@ final class PreviewWindowManager: ObservableObject {
         }
     }
 
-    func openPreview(url: URL, aspectRatio: Double? = nil, isWeb: Bool = false, posterURL: URL? = nil) {
+    func openPreview(url: URL, aspectRatio: Double? = nil) {
         removeCloseObserver()
         windowController?.close()
         windowController = nil
@@ -43,8 +42,8 @@ final class PreviewWindowManager: ObservableObject {
             ?? NSScreen.screens.first
         let screenFrame = screen?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1280, height: 800)
 
-        let maxWidth = max(1000, screenFrame.width * 0.85)
-        let maxHeight = max(700, screenFrame.height * 0.85)
+        let maxWidth = min(screenFrame.width, max(400, screenFrame.width * 0.85))
+        let maxHeight = min(screenFrame.height, max(400, screenFrame.height * 0.85))
 
         var width = maxWidth
         var height = maxHeight
@@ -80,7 +79,7 @@ final class PreviewWindowManager: ObservableObject {
         WindowSpaceCoordinator.prepare(window)
 
         let hostingView = NSHostingView(
-            rootView: WallpaperPreviewSheet(url: url, isWeb: isWeb, posterURL: posterURL)
+            rootView: StaticWallpaperPreview(url: url)
         )
         window.contentView = hostingView
 
@@ -99,7 +98,6 @@ final class PreviewWindowManager: ObservableObject {
                 guard let self else { return }
                 self.removeCloseObserver()
                 // 主动断开 hosting view，触发 SwiftUI .onDisappear /
-                // PreviewPlayer.deinit，避免 AVPlayer 在窗口隐藏后继续播放音频
                 if let win = self.windowController?.window {
                     win.contentView = nil
                 }

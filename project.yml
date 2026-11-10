@@ -15,6 +15,14 @@ schemes:
       config: Debug
     archive:
       config: Release
+  WaifuXHelper:
+    build:
+      targets:
+        WaifuXHelper: all
+    run:
+      config: Debug
+    archive:
+      config: Release
 packages:
   Kingfisher:
     url: https://github.com/onevcat/Kingfisher.git

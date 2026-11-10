@@ -449,17 +449,10 @@ final class WallpaperLibraryService: ObservableObject {
     private func wallpaperDeletePhysicalFile(at path: String, itemID: String) {
         guard !path.isEmpty else { return }
         let fm = FileManager.default
-        // 如果是 Workshop 下载的内容，删除整个 workshop_xxx 文件夹
-        if let workshopRoot = WorkshopDownloadDeletion.rootDirectory(for: path, itemID: itemID),
-           fm.fileExists(atPath: workshopRoot) {
-            do {
-                try fm.removeItem(atPath: workshopRoot)
-                print("[WallpaperLibraryService] ✅ Deleted workshop folder: \(workshopRoot)")
-            } catch {
-                print("[WallpaperLibraryService] ⚠️ Failed to delete workshop folder \(workshopRoot): \(error)")
-            }
-            return
-        }
+        guard path.hasPrefix("/"), WallhavenContentPolicy.isWallpaperID(itemID),
+              ["jpg", "jpeg", "png", "webp"].contains(URL(fileURLWithPath: path).pathExtension.lowercased()) else { return }
+        var isDirectory: ObjCBool = false
+        guard fm.fileExists(atPath: path, isDirectory: &isDirectory), !isDirectory.boolValue else { return }
         if fm.fileExists(atPath: path) {
             do {
                 try fm.removeItem(atPath: path)

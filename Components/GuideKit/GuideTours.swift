@@ -14,10 +14,6 @@ enum GuideTours {
             return home
         case .wallpaperExplore:
             return explore
-        case .mediaExplore:
-            return media
-        case .animeExplore:
-            return anime
         case .myMedia:
             return library
         }
@@ -70,22 +66,7 @@ enum GuideTours {
     )
 
     /// 动态锁屏：设置页滚到该区块首次可见时播（noteSheetOpened；设置窗为独立 NSWindow）。
-    static let lockscreen = GuideTour(
-        id: "lockscreen",
-        contentVersion: 1,
-        steps: [
-            GuideStep(
-                anchor: .lockscreenToggle,
-                titleKey: "guide.lockscreen.toggle.title",
-                bodyKey: "guide.lockscreen.toggle.body"
-            ),
-            GuideStep(
-                anchor: .lockscreenStatusRow,
-                titleKey: "guide.lockscreen.status.title",
-                bodyKey: "guide.lockscreen.status.body"
-            )
-        ]
-    )
+
 
     /// 设置页总览：打开设置窗首次播（左栏分类逐个高亮）。
     static let settingsOverview = GuideTour(
@@ -103,11 +84,6 @@ enum GuideTours {
                 bodyKey: "guide.settings.general.body"
             ),
             GuideStep(
-                anchor: .settingsTabModules,
-                titleKey: "guide.settings.modules.title",
-                bodyKey: "guide.settings.modules.body"
-            ),
-            GuideStep(
                 anchor: .settingsTabDownload,
                 titleKey: "guide.settings.download.title",
                 bodyKey: "guide.settings.download.body"
@@ -116,21 +92,6 @@ enum GuideTours {
                 anchor: .settingsTabWallhaven,
                 titleKey: "guide.settings.wallhaven.title",
                 bodyKey: "guide.settings.wallhaven.body"
-            ),
-            GuideStep(
-                anchor: .settingsTabWorkshop,
-                titleKey: "guide.settings.workshop.title",
-                bodyKey: "guide.settings.workshop.body"
-            ),
-            GuideStep(
-                anchor: .settingsTabPixiv,
-                titleKey: "guide.settings.pixiv.title",
-                bodyKey: "guide.settings.pixiv.body"
-            ),
-            GuideStep(
-                anchor: .settingsTabKonachan,
-                titleKey: "guide.settings.konachan.title",
-                bodyKey: "guide.settings.konachan.body"
             ),
             GuideStep(
                 anchor: .settingsTabScheduler,
@@ -205,11 +166,6 @@ enum GuideTours {
         contentVersion: 1,
         steps: [
             GuideStep(
-                anchor: .exploreSourceMenu,
-                titleKey: "guide.explore.source.title",
-                bodyKey: "guide.explore.source.body"
-            ),
-            GuideStep(
                 anchor: .exploreHeader,
                 titleKey: "guide.explore.scroll.title",
                 bodyKey: "guide.explore.scroll.body"
@@ -236,47 +192,11 @@ enum GuideTours {
 
     // MARK: 动态壁纸探索（3 步）
 
-    static let media = GuideTour(
-        id: "mediaExplore",
-        contentVersion: 1,
-        steps: [
-            GuideStep(
-                anchor: .mediaSourceMenu,
-                titleKey: "guide.media.source.title",
-                bodyKey: "guide.media.source.body"
-            ),
-            GuideStep(
-                anchor: .mediaResolutionMenu,
-                titleKey: "guide.media.res.title",
-                bodyKey: "guide.media.res.body"
-            ),
-            // 搜索行三个快捷圆钮（与壁纸页共用文案）
-            GuideStep(
-                anchor: .mediaActionCircles,
-                titleKey: "guide.circles.title",
-                bodyKey: "guide.circles.body"
-            )
-        ]
-    )
+
 
     // MARK: 番剧（2 步）
 
-    static let anime = GuideTour(
-        id: "animeExplore",
-        contentVersion: 1,
-        steps: [
-            GuideStep(
-                anchor: .animeBackgroundPanel,
-                titleKey: "guide.anime.background.title",
-                bodyKey: "guide.anime.background.body"
-            ),
-            GuideStep(
-                anchor: .animeResetFilters,
-                titleKey: "guide.anime.reset.title",
-                bodyKey: "guide.anime.reset.body"
-            )
-        ]
-    )
+
 
     // MARK: 我的库（3 步）
 
@@ -305,11 +225,6 @@ enum GuideTours {
                 anchor: .librarySearchControl,
                 titleKey: "guide.library.search.title",
                 bodyKey: "guide.library.search.body"
-            ),
-            GuideStep(
-                anchor: .libraryImportButton,
-                titleKey: "guide.library.import.title",
-                bodyKey: "guide.library.import.body"
             ),
             GuideStep(
                 anchor: .libraryMoreMenuButton,

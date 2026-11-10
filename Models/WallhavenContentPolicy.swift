@@ -20,6 +20,12 @@ enum WallhavenContentPolicy {
         return ["jpg", "jpeg", "png", "webp"].contains(url.pathExtension.lowercased())
     }
 
+    /// Includes uploader avatars served by Wallhaven's own image host.
+    static func isImageRequestURL(_ url: URL) -> Bool {
+        isImageURL(url) || (isSecurePublicURL(url) && url.host?.lowercased() == "a.wallhaven.cc"
+            && ["jpg", "jpeg", "png", "webp", "gif"].contains(url.pathExtension.lowercased()))
+    }
+
     static func isWallpaperRecord(id: String, detailURL: String, imagePath: String) -> Bool {
         guard isWallpaperID(id), let detail = URL(string: detailURL),
               wallpaperID(from: detail) == id else { return false }

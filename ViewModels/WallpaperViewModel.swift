@@ -282,8 +282,7 @@ class WallpaperViewModel: ObservableObject {
                 self?.networkStatus = status
                 // 网络恢复时自动刷新（壁纸模块关闭时跳过，避免禁用后仍触发 Wallhaven 请求）
                 if status.connectionState.isConnected
-                    && self?.wallpapers.isEmpty == true
-                    && ModuleAvailability.shared.wallpaperEnabled {
+                    && self?.wallpapers.isEmpty == true {
                     Task { await self?.search() }
                 }
             }
@@ -604,6 +603,8 @@ class WallpaperViewModel: ObservableObject {
             from: url,
             headers: WallhavenAPI.authenticationHeaders(apiKey: normalizedAPIKey)
         )
+        guard response.data.id == id,
+              WallhavenContentPolicy.isWallpaperRecord(id: id, detailURL: response.data.url, imagePath: response.data.path) else { throw NetworkError.invalidResponse }
         return response.data
     }
 
@@ -1025,7 +1026,9 @@ class WallpaperViewModel: ObservableObject {
                     headers: WallhavenAPI.authenticationHeaders(apiKey: self.normalizedAPIKey)
                 )
             }
-            return result
+            return WallpaperSearchResponse(meta: result.meta, data: result.data.filter {
+                WallhavenContentPolicy.isWallpaperRecord(id: $0.id, detailURL: $0.url, imagePath: $0.path)
+            })
         } catch {
             throw error
         }
@@ -1231,11 +1234,11 @@ class WallpaperViewModel: ObservableObject {
 
     // MARK: - 设置壁纸
     func setWallpaper(from imageURL: URL, option: WallpaperOption) async throws {
-        try await StaticWallpaperApplyService.apply(from: imageURL, option: option)
+        _ = try await LocalWallpaperApplyService.apply(localURL: imageURL, targetScreens: nil)
     }
 
     func setWallpaper(from imageURL: URL, option: WallpaperOption, for targetScreen: NSScreen?) async throws {
-        try await StaticWallpaperApplyService.apply(from: imageURL, option: option, for: targetScreen)
+        _ = try await LocalWallpaperApplyService.apply(localURL: imageURL, targetScreens: targetScreen.map { [$0] })
     }
 
     // MARK: - 设为壁纸（通过 Wallpaper 对象）

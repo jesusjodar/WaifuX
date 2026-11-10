@@ -57,10 +57,11 @@ final class GlobalWallpaperSyncCoordinator {
   }
   func synchronizeCurrentWallpaperAfterEnabling() { reapplyToConnectedDisplays() }
   func reapplyToConnectedDisplays() {
-    guard !isStopping, !BackgroundRuntimeRole.isRemoteUI else { return }
+    guard !isStopping, requests.isEmpty, !BackgroundRuntimeRole.isRemoteUI else { return }
     Task {
+      guard requests.isEmpty else { return }
       var original = lastSuccessfulApply.map { URL(fileURLWithPath: $0.localPath) }
-      if original == nil, let screen = NSScreen.screens.first,
+      if original.map({ WallpaperLibraryService.shared.downloadRecord(forLocalFilePath: $0.path) == nil || !FileManager.default.fileExists(atPath: $0.path) }) ?? true, let screen = NSScreen.screens.first,
         let current = CurrentWallpaperService.shared.activeURL(
           for: screen.wallpaperScreenIdentifier)
       {
@@ -73,7 +74,10 @@ final class GlobalWallpaperSyncCoordinator {
       guard let original,
         WallpaperLibraryService.shared.downloadRecord(forLocalFilePath: original.path) != nil
       else { return }
-      do { _ = try await apply(localURL: original, options: .init()) } catch {
+      guard requests.isEmpty else { return }
+      var options = LocalWallpaperApplyService.Options()
+      options.reason = "static-recovery"
+      do { _ = try await apply(localURL: original, options: options) } catch {
         AppLogger.warn(
           .wallpaper, "Global static wallpaper recovery failed",
           metadata: ["error": error.localizedDescription])

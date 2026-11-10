@@ -66,13 +66,9 @@ struct FullScreenWallpaperView: View {
     var wallpaper: Wallpaper { currentWallpaper }
 
     // MARK: - 本地文件检测
-    private var isLocalFile: Bool {
-        wallpaper.id.hasPrefix("local_")
-    }
-
     /// 是否已下载（包括网络下载和本地文件）
     private var isAlreadyDownloaded: Bool {
-        isLocalFile || viewModel.isDownloaded(wallpaper)
+        viewModel.isDownloaded(wallpaper)
     }
 
     init(wallpaper: Wallpaper, viewModel: WallpaperViewModel) {
@@ -270,11 +266,8 @@ struct FullScreenWallpaperView: View {
                         icon: isAlreadyDownloaded ? "checkmark.circle.fill" : "arrow.down.circle",
                         color: isAlreadyDownloaded ? LiquidGlassColors.onlineGreen : .white
                     ) {
-                        if !isLocalFile {
-                            downloadWallpaper()
-                        }
+                        downloadWallpaper()
                     }
-                    .disabled(isLocalFile)
 
                     // 设为壁纸按钮
                     GlassToolbarButton(
@@ -601,11 +594,6 @@ struct FullScreenWallpaperView: View {
     }
 
     private func downloadWallpaper() {
-        // 本地文件无需下载
-        if isLocalFile {
-            return
-        }
-
         Task {
             do {
                 try await viewModel.downloadWallpaper(wallpaper)
@@ -630,16 +618,9 @@ struct FullScreenWallpaperView: View {
 
     private func setAsWallpaper() {
         Task {
-            let targetScreenIDs = Set(NSScreen.screens.map(\.wallpaperScreenIdentifier))
-            await WallpaperSchedulerService.shared.beginManualWallpaperApply()
             do {
                 try await viewModel.setAsWallpaper(wallpaper)
-                WallpaperSchedulerService.shared.notifyManualWallpaperChange()
             } catch {
-                WallpaperSchedulerService.shared.completeManualWallpaperApply(
-                    success: false,
-                    screenIDs: targetScreenIDs
-                )
                 print("Set wallpaper error: \(error)")
             }
         }

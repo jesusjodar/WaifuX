@@ -23,7 +23,7 @@ struct DownloadToastSnapshot: Equatable, Identifiable {
     }
 
     var isRunning: Bool {
-        status == .pending || status == .downloading || status == .waitingForSteamLogin
+        status == .pending || status == .downloading
     }
 
     var isActionable: Bool {
@@ -54,9 +54,7 @@ class DownloadTaskViewModel: ObservableObject {
         _ = downloadService.addTask(wallpaper: wallpaper)
     }
 
-    func addTask(mediaItem: MediaItem) {
-        _ = downloadService.addTask(mediaItem: mediaItem)
-    }
+
 
     func pauseTask(_ task: DownloadTask) {
         downloadService.pauseTask(id: task.id)
@@ -84,7 +82,6 @@ class DownloadTaskViewModel: ObservableObject {
         tasks.filter {
             $0.status == .pending
                 || $0.status == .downloading
-                || $0.status == .waitingForSteamLogin
                 || $0.status == .paused
         }
     }
@@ -97,9 +94,7 @@ class DownloadTaskViewModel: ObservableObject {
         libraryVisibleTasks.filter { $0.kind == .wallpaper }
     }
 
-    var mediaTasks: [DownloadTask] {
-        libraryVisibleTasks.filter { $0.kind == .media }
-    }
+
 
     var completedTasks: [DownloadTask] {
         tasks.filter { $0.status == .completed }
@@ -122,19 +117,17 @@ class DownloadTaskViewModel: ObservableObject {
 final class DownloadToastViewModel: ObservableObject {
     @Published private(set) var snapshot: DownloadToastSnapshot?
     @Published private(set) var activeTaskCount: Int = 0
-    @Published private(set) var workshopQueuedCount: Int = 0
 
     private let downloadService: DownloadTaskService
-    private let workshopService: WorkshopService
     private var cancellables = Set<AnyCancellable>()
     private var preferredRunningTaskID: String?
     private var lastEmittedSnapshot: DownloadToastSnapshot?
     private var lastToastProgressEmitDate: Date?
     private let runningProgressEmitInterval: TimeInterval = 0.20
 
-    init(downloadService: DownloadTaskService = .shared, workshopService: WorkshopService = .shared) {
+    init(downloadService: DownloadTaskService = .shared) {
+
         self.downloadService = downloadService
-        self.workshopService = workshopService
 
         Publishers.CombineLatest(
             downloadService.$tasks,
@@ -155,10 +148,7 @@ final class DownloadToastViewModel: ObservableObject {
             }
             .store(in: &cancellables)
 
-        workshopService.$workshopQueuedCount
-            .receive(on: DispatchQueue.main)
-            .removeDuplicates()
-            .assign(to: &$workshopQueuedCount)
+
     }
 
     func isSuppressed(taskID: String) -> Bool {

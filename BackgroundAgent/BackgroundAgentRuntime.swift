@@ -534,15 +534,6 @@
           localURL: a.url("url"), targetScreens: a.screens("screens"),
           options: a.decode("options", as: LocalWallpaperApplyService.Options.self))
         return ["success": success]
-      case "wallpaper.static":
-        try await StaticWallpaperApplyService.apply(
-          from: a.url("url"), option: WallpaperOption(rawValue: a.string("option")) ?? .desktop)
-        return [:]
-      case "wallpaper.staticScreen":
-        try await StaticWallpaperApplyService.apply(
-          from: a.url("url"), option: WallpaperOption(rawValue: a.string("option")) ?? .desktop,
-          for: a.optionalScreen("screen"))
-        return [:]
       case "scheduler.triggerNextWallpaperNow":
         try WallpaperSchedulerService.shared.triggerNextWallpaperNow(for: try a.string("screenID"))
         return [:]
@@ -561,15 +552,6 @@
         return [:]
       case "scheduler.suppressAutoSwitchGlobally":
         WallpaperSchedulerService.shared.suppressAutoSwitchGlobally()
-        return [:]
-      case "scheduler.beginManualApply":
-        await WallpaperSchedulerService.shared.beginManualWallpaperApply()
-        return [:]
-      case "scheduler.completeManualApply":
-        WallpaperSchedulerService.shared.completeManualWallpaperApply(
-          success: a.bool("success"),
-          screenIDs: Set(a.values["screenIDs"] as? [String] ?? [])
-        )
         return [:]
       case "scheduler.stop":
         WallpaperSchedulerService.shared.stop()
@@ -856,6 +838,9 @@
         ThemeManager.shared.restoreSavedSettings()
       }
       if key == nil || key == "app_language" { LocalizationService.shared.restoreSavedSettings() }
+      if key == nil || key == "pause_rotation_on_battery" {
+        WallpaperSchedulerService.shared.reevaluateBatteryPolicy()
+      }
       if key == nil || key == "prevent_system_sleep" {
         SleepPreventer.shared.setPreventingSleep(
           WaifuXPreferences.shared.bool(forKey: "prevent_system_sleep"), reason: .userSetting)

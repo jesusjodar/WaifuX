@@ -479,9 +479,6 @@ final class CloudSyncService: ObservableObject {
             let response = try await BackgroundAgentClient.shared.request(operation)
             if let state = response["cloud"] as? [String: Any] { applyRemoteSnapshot(state) }
             WaifuXPreferences.shared.synchronize()
-            AnimeFavoriteStore.shared.restoreSavedData()
-            AnimeProgressStore.shared.restoreSavedData()
-            PlaybackProgressCache.shared.restoreSavedData()
             LibraryGridOrderStore.shared.reloadFromPreferences()
         } catch {
             isSyncing = false

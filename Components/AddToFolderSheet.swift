@@ -5,7 +5,6 @@ struct AddToFolderSheetView: View {
     let contentType: ContentType
     let subTab: MyLibraryContentView.SubTab
     let availableWallpapers: [(id: String, name: String, thumbURL: URL?, localFileURL: URL?)]
-    let availableMedia: [(id: String, name: String, thumbURL: URL?)]
     let onAdd: ([String]) -> Void
     let onDismiss: () -> Void
 
@@ -18,14 +17,10 @@ struct AddToFolderSheetView: View {
         return availableWallpapers.filter { $0.name.lowercased().contains(q) }
     }
 
-    private var filteredMedia: [(id: String, name: String, thumbURL: URL?)] {
-        guard !searchQuery.isEmpty else { return availableMedia }
-        let q = searchQuery.lowercased()
-        return availableMedia.filter { $0.name.lowercased().contains(q) }
-    }
+
 
     private var currentCount: Int {
-        contentType == .wallpaper ? filteredWallpapers.count : filteredMedia.count
+        filteredWallpapers.count
     }
 
     private let columns = [
@@ -116,15 +111,11 @@ struct AddToFolderSheetView: View {
             } else {
                 ScrollView {
                     LazyVGrid(columns: columns, spacing: 10) {
-                        if contentType == .wallpaper {
+
                             ForEach(filteredWallpapers, id: \.id) { item in
                                 wallpaperPickerCard(item: item)
                             }
-                        } else {
-                            ForEach(filteredMedia, id: \.id) { item in
-                                mediaPickerCard(item: item)
-                            }
-                        }
+
                     }
                     .padding(16)
                 }
@@ -258,77 +249,13 @@ struct AddToFolderSheetView: View {
         .buttonStyle(.plain)
             }
 
-    private func mediaPickerCard(item: (id: String, name: String, thumbURL: URL?)) -> some View {
-        let isSelected = selectedIDs.contains(item.id)
-        return Button {
-            if isSelected {
-                selectedIDs.remove(item.id)
-            } else {
-                selectedIDs.insert(item.id)
-            }
-        } label: {
-            VStack(spacing: 0) {
-                ZStack(alignment: .topTrailing) {
-                    KFImage(item.thumbURL)
-                        .setProcessor(DownsamplingImageProcessor(size: CGSize(width: 256, height: 256)))
-                        .cacheMemoryOnly(false)
-                        .placeholder { _ in
-                            Color.gray.opacity(0.2)
-                        }
-                        .resizable()
-                        .scaledToFill()
-                        .frame(width: 130, height: 90)
-                        .clipped()
 
-                    // Video badge
-                    Image(systemName: "video.fill")
-                        .font(.system(size: 9, weight: .bold))
-                        .foregroundStyle(.white.opacity(0.8))
-                        .padding(4)
-                        .background(Color.black.opacity(0.5))
-                        .clipShape(Capsule())
-                        .padding(.leading, 6)
-                        .padding(.bottom, 6)
-                        .frame(width: 130, height: 90, alignment: .bottomLeading)
-
-                    Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
-                        .font(.system(size: 18, weight: .bold))
-                        .foregroundStyle(isSelected ? Color.accentColor : .white.opacity(0.6))
-                        .padding(6)
-                        .background(
-                            Circle()
-                                .fill(.black.opacity(0.4))
-                        )
-                        .padding(5)
-                }
-
-                Text(item.name)
-                    .font(.system(size: 10, weight: .medium))
-                    .foregroundStyle(.white.opacity(0.8))
-                    .lineLimit(1)
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 5)
-                    .frame(width: 130, alignment: .leading)
-                    .background(Color.black.opacity(0.3))
-            }
-            .frame(width: 130)
-            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-            .overlay(
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .stroke(isSelected ? Color.accentColor.opacity(0.7) : Color.white.opacity(0.1),
-                            lineWidth: isSelected ? 2 : 1)
-            )
-        }
-        .buttonStyle(.plain)
-            }
 
     // MARK: - Helpers
 
     private var currentItems: [(id: String, name: String)] {
-        if contentType == .wallpaper {
+
             return filteredWallpapers.map { (id: $0.id, name: $0.name) }
-        } else {
-            return filteredMedia.map { (id: $0.id, name: $0.name) }
-        }
+
     }
 }

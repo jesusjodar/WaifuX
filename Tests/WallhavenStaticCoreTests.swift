@@ -129,6 +129,11 @@ enum WallhavenStaticCoreTests {
         ] {
             precondition(WallhavenContentPolicy.imageURL(address) == nil)
         }
+        precondition(WallhavenContentPolicy.isImageRequestURL(URL(string: "https://a.wallhaven.cc/avatar/user.png")!))
+        precondition(!WallhavenContentPolicy.isImageURL(URL(string: "https://a.wallhaven.cc/avatar/user.png")!))
+        for address in ["https://a.wallhaven.cc.evil.test/avatar.png", "http://a.wallhaven.cc/avatar.png", "https://u@a.wallhaven.cc/avatar.png", "https://a.wallhaven.cc:9000/avatar.png", "https://a.wallhaven.cc/avatar.mp4"] {
+            precondition(!WallhavenContentPolicy.isImageRequestURL(URL(string: address)!))
+        }
         for dimensions in [(7680.0, 4320.0), (50000, 100000), (1, 1000000)] {
             for bytes in [4, 8, 16] {
                 let layout = WallpaperSnapshotPixelBudget.layout(width: dimensions.0, height: dimensions.1, decodedBytesPerPixel: bytes)!

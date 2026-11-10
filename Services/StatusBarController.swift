@@ -96,8 +96,7 @@ final class StatusBarController: NSObject, NSMenuDelegate {
         currentWallpaperURL: screen.flatMap {
           CurrentWallpaperService.shared.activeURL(for: $0.wallpaperScreenIdentifier)
         },
-        canDesignCurrentWallpaper: false,
-        onOpenSettings: { WaifuXUIActions.perform(.settings) }, onOpenDesignWallpaper: {},
+        onOpenSettings: { WaifuXUIActions.perform(.settings) },
         onOpenDetail: { request in
           MainNavigationRequestStore.requestWallpaperDetail(request)
           WaifuXUIActions.perform(.wallpaperDetail)
