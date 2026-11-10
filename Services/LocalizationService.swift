@@ -136,7 +136,7 @@ private let translations: [LocalizationService.Language: [String: String]] = [
         "clear": "BORRAR",
         "clearCache": "VACIAR CACHÉ",
         "clearCacheConfirm": "¿Seguro que quieres vaciar toda la caché? Se eliminarán las miniaturas descargadas y los archivos temporales.",
-        "cloudSync": "SINCRONIZAR",
+        "cloudSync": "Sincronizar",
         "colorFilter": "FILTRO DE COLOR",
         "colors": "COLORES",
         "common.enterURL": "Introduce una URL",
