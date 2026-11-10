@@ -19,7 +19,14 @@ enum CropLayoutEngine {
         screenSize: CGSize,
         settings: DisplayCropSettings
     ) -> CropLayout {
+        let settings = settings.sanitized
         let letterboxColor = Self.parseColorHex(settings.letterboxColorHex)
+        guard wallpaperSize.width.isFinite, wallpaperSize.height.isFinite,
+              screenSize.width.isFinite, screenSize.height.isFinite,
+              wallpaperSize.width > 0, wallpaperSize.height > 0,
+              screenSize.width > 0, screenSize.height > 0 else {
+            return CropLayout(wallpaperCropRect: .full, viewportRect: .full, letterboxColor: letterboxColor)
+        }
 
         // 关闭时回退现状（全屏 + 全图）。
         guard settings.shouldApplyCrop else {

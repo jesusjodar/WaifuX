@@ -482,105 +482,14 @@ struct HelpPopoverView: View {
 
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
-                    // 第1节：网络与数据源
-                    tutorialSection(
-                        icon: "globe",
-                        title: t("tutorial.network.title"),
-                        lines: [
-                            t("tutorial.network.l1"),
-                            t("tutorial.network.l2"),
-                            t("tutorial.network.l3"),
-                            t("tutorial.network.l5"),
-                            t("tutorial.network.l6"),
-                            t("tutorial.network.l7"),
-                            t("tutorial.network.l8"),
-                            t("tutorial.network.l9")
-                        ]
-                    )
-
-                    // 第2节：壁纸引擎
-                    tutorialSection(
-                        icon: "rectangle.and.text.magnifyingglass",
-                        title: t("tutorial.we.title"),
-                        lines: [
-                            t("tutorial.we.l1"),
-                            t("tutorial.we.l2"),
-                            t("tutorial.we.l3")
-                        ]
-                    )
-
-                    // 第3节：设置功能
-                    tutorialSection(
-                        icon: "gearshape.2",
-                        title: t("tutorial.settings.title"),
-                        lines: [
-                            t("tutorial.settings.l1"),
-                            t("tutorial.settings.l2"),
-                            t("tutorial.settings.l3"),
-                            t("tutorial.settings.l4"),
-                            t("tutorial.settings.l5"),
-                            t("tutorial.settings.l6"),
-                            t("tutorial.settings.l7")
-                        ]
-                    )
-
-                    // 第4节：我的库与导入
-                    tutorialSection(
-                        icon: "tray.and.arrow.down.fill",
-                        title: t("tutorial.library.title"),
-                        lines: [
-                            t("tutorial.library.l1"),
-                            t("tutorial.library.l2"),
-                            t("tutorial.library.l3"),
-                            t("tutorial.library.l4"),
-                            t("tutorial.library.l5"),
-                            t("tutorial.library.l6"),
-                            t("tutorial.library.l7"),
-                            t("tutorial.library.l8"),
-                            t("tutorial.library.l9")
-                        ]
-                    )
-
-                    // 第5节：壁纸详情
-                    tutorialSection(
-                        icon: "doc.text.magnifyingglass",
-                        title: t("tutorial.detail.title"),
-                        lines: [
-                            t("tutorial.detail.l1"),
-                            t("tutorial.detail.l2"),
-                            t("tutorial.detail.l3"),
-                            t("tutorial.detail.l4"),
-                            t("tutorial.detail.l5")
-                        ]
-                    )
-
-                    // 第6节：场景/Web壁纸编辑
-                    tutorialSection(
-                        icon: "pencil.and.outline",
-                        title: t("tutorial.sceneWeb.title"),
-                        lines: [
-                            t("tutorial.sceneWeb.l1"),
-                            t("tutorial.sceneWeb.l2"),
-                            t("tutorial.sceneWeb.l3"),
-                            t("tutorial.sceneWeb.l4"),
-                            t("tutorial.sceneWeb.l5"),
-                            t("tutorial.sceneWeb.l6")
-                        ]
-                    )
-
-                    // 第7节：动态锁屏
-                    tutorialSection(
-                        icon: "lock.display",
-                        title: t("tutorial.lockScreen.title"),
-                        lines: [
-                            t("tutorial.lockScreen.l1"),
-                            t("tutorial.lockScreen.l2"),
-                            t("tutorial.lockScreen.l3"),
-                            t("tutorial.lockScreen.l4"),
-                            t("tutorial.lockScreen.l5"),
-                            t("tutorial.lockScreen.l6")
-                        ]
-                    )
+                    tutorialSection(icon: "globe", title: t("tutorial.wallhaven.title"), lines: [
+                        t("tutorial.wallhaven.l1"), t("tutorial.wallhaven.l2"), t("tutorial.wallhaven.l3")])
+                    tutorialSection(icon: "tray.and.arrow.down.fill", title: t("tutorial.library.title"), lines: [
+                        t("tutorial.wallhaven.library1"), t("tutorial.wallhaven.library2"), t("tutorial.wallhaven.library3")])
+                    tutorialSection(icon: "photo", title: t("tutorial.detail.title"), lines: [
+                        t("tutorial.wallhaven.detail1"), t("tutorial.wallhaven.detail2"), t("tutorial.wallhaven.detail3")])
+                    tutorialSection(icon: "gearshape.2", title: t("tutorial.settings.title"), lines: [
+                        t("tutorial.wallhaven.settings1"), t("tutorial.wallhaven.settings2"), t("tutorial.wallhaven.settings3")])
                 }
                 .frame(maxWidth: .infinity)
                 .padding(16)
@@ -645,7 +554,7 @@ private struct TopBarSegmentedControl: View {
     var body: some View {
         HStack(spacing: 6) {
             // 仅显示启动快照启用的 tab（home/myMedia 永远显示；三个 Explore 受功能模块开关门控）
-            ForEach(MainTab.allCases.filter { ModuleAvailability.shared.isTabEnabled($0) }, id: \.self) { tab in
+            ForEach(MainTab.allCases, id: \.self) { tab in
                 Button {
                     withAnimation(.spring(response: 0.28, dampingFraction: 0.84)) {
                         selectedTab = tab

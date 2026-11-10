@@ -4,7 +4,6 @@ import Foundation
 struct MenuBarQuickIndexEntry: Sendable {
     let id: String
     let path: String
-    let bakedPath: String?
     let folderKey: String
     let downloadedAt: Date
     let visible: Bool
@@ -16,7 +15,6 @@ struct MenuBarQuickIndex: Sendable {
     var visibleIDs = Set<String>()
     /// Includes hidden records: a known hidden path must never become an external item.
     var ownerByPath: [String: String] = [:]
-    var descendantOwnerByPath: [String: String] = [:]
     var hiddenPaths = Set<String>()
 
     static func normalizedPath(_ path: String) -> String {
@@ -32,40 +30,17 @@ struct MenuBarQuickIndex: Sendable {
                 index.visibleIDs.insert(entry.id)
                 index.idsByFolder[entry.folderKey, default: []].append(entry.id)
             }
-            for raw in [entry.path, entry.bakedPath].compactMap({ $0 }) {
-                let path = normalizedPath(raw)
-                index.ownerByPath[path] = entry.id
-                if !entry.visible { index.hiddenPaths.insert(path) }
-                var parent = (path as NSString).deletingLastPathComponent
-                while parent.count > 1 {
-                    // Ambiguous parent paths fail closed for current-item lookup.
-                    if let previous = index.descendantOwnerByPath[parent], previous != entry.id {
-                        index.descendantOwnerByPath[parent] = ""
-                    } else if index.descendantOwnerByPath[parent] == nil {
-                        index.descendantOwnerByPath[parent] = entry.id
-                    }
-                    parent = (parent as NSString).deletingLastPathComponent
-                }
-            }
+            let path = normalizedPath(entry.path)
+            index.ownerByPath[path] = entry.id
+            if !entry.visible { index.hiddenPaths.insert(path) }
         }
         return index
     }
 
     func owner(of rawPath: String) -> String? {
         let path = Self.normalizedPath(rawPath)
-        if hiddenPaths.contains(path) { return "" }
-        var privacyParent = (path as NSString).deletingLastPathComponent
-        while privacyParent.count > 1 {
-            if hiddenPaths.contains(privacyParent) { return "" }
-            privacyParent = (privacyParent as NSString).deletingLastPathComponent
-        }
-        if let exact = ownerByPath[path] { return exact }
-        var parent = (path as NSString).deletingLastPathComponent
-        while parent.count > 1 {
-            if let owner = ownerByPath[parent] { return owner }
-            parent = (parent as NSString).deletingLastPathComponent
-        }
-        return descendantOwnerByPath[path]
+        guard !hiddenPaths.contains(path) else { return nil }
+        return ownerByPath[path]
     }
 
     /// Samples at most `limit` entries without shuffling or copying the whole library.
@@ -107,56 +82,18 @@ struct MenuBarQuickIndex: Sendable {
     }
 }
 
-/// A local wallpaper candidate shown by the menu-bar quick switcher.
-///
-/// The item deliberately keeps the original library record payload so actions such as
-/// applying the wallpaper and toggling a favorite continue to use the shared services.
+/// A downloaded Wallhaven image; unknown local files never become candidates.
 struct MenuBarQuickWallpaperItem: Identifiable {
-    enum Source {
-        case wallpaper(Wallpaper)
-        case media(MediaItem)
-        /// 当前屏正在使用、但库里没有对应下载记录的文件（例如从 Finder 直接设的图）。
-        /// 只能展示与重新设置，没有详情页与收藏入口。
-        case external
-    }
-
     let id: String
     let title: String
     let localURL: URL
     let thumbnailURL: URL?
-    let videoPreviewURL: URL?
     let downloadedAt: Date
-    let source: Source
-    let sceneBakeItemID: String?
-    let bakedVideoPath: String?
-    /// 所属下载文件夹；nil = 未归档（我的库根）。
-    /// 文件夹筛选，以及「当前壁纸是否落在所选文件夹内」，都依赖这个字段。
+    let wallpaper: Wallpaper
     let folderID: String?
 
-    /// external 项没有库记录，详情/收藏等库操作不可用。
-    var isLibraryItem: Bool {
-        if case .external = source { return false }
-        return true
-    }
-
-    func replacingPreview(thumbnailURL: URL?, videoURL: URL?, bakedVideoPath: String?) -> Self {
-        Self(id: id, title: title, localURL: localURL, thumbnailURL: thumbnailURL,
-             videoPreviewURL: videoURL, downloadedAt: downloadedAt, source: source,
-             sceneBakeItemID: sceneBakeItemID, bakedVideoPath: bakedVideoPath, folderID: folderID)
-    }
-
-    func replacingThumbnail(with thumbnailURL: URL?) -> Self {
-        MenuBarQuickWallpaperItem(
-            id: id,
-            title: title,
-            localURL: localURL,
-            thumbnailURL: thumbnailURL,
-            videoPreviewURL: videoPreviewURL,
-            downloadedAt: downloadedAt,
-            source: source,
-            sceneBakeItemID: sceneBakeItemID,
-            bakedVideoPath: bakedVideoPath,
-            folderID: folderID
-        )
+    func replacingThumbnail(with url: URL?) -> Self {
+        Self(id: id, title: title, localURL: localURL, thumbnailURL: url,
+             downloadedAt: downloadedAt, wallpaper: wallpaper, folderID: folderID)
     }
 }

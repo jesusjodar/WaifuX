@@ -1,149 +1,25 @@
-# Contributing to WaifuX / 为 WaifuX 贡献
+# Contributing to WaifuX Wallhaven
 
-Thank you for your interest in contributing to WaifuX! This document provides guidelines for contributing to the project.
+This fork is maintained at `jesusjodar/WaifuX` and retains the original WaifuX attribution and license. Please be respectful, report reproducible issues and keep contributions focused.
 
-感谢您对 WaifuX 的贡献兴趣！本文档提供了为项目贡献的指南。
+## Pull requests
 
----
+1. Create a branch from the fork's `main` (or the active static-reduction branch when contributing to that work).
+2. Explain the concrete problem and resulting behavior. Preserve Wallhaven image categories, original downloads and user data.
+3. Add meaningful tests for behavior changes. Use `project.yml` as the source of truth and regenerate with XcodeGen.
+4. Update documentation and all four localization catalogs when the interface changes.
+5. Open the PR against `jesusjodar/WaifuX`, with exact validation results and any pending visual or device checks.
 
-## 🌐 Languages / 语言
+Keep unrelated files, generated products, credentials and local assistant instructions out of commits. Do not publish a release, announce an update or change another repository as a side effect of a PR.
 
-- [English](#english-guidelines)
-- [中文](#中文指南)
+## Validation
 
----
+Use the build and test commands in [README.md](README.md). Required checks cover static policies, the production download queue, cloud files, localization and isolated helper integration. Build Debug and Release for Apple Silicon and Intel from clean products, then audit the package with `scripts/verify-project-configuration.py --app PATH --architectures arm64 x86_64`.
 
-<a name="english-guidelines"></a>
-## 🇺🇸 English Guidelines
+The helper tests use isolated preference suites and temporary files. Real wallpaper application must be tested explicitly; an isolated test must not change the user's desktop. Distinguish automated results from actual UI, Spaces, sleep and reconnection evidence.
 
-### Code of Conduct
+Only the app and static helper are shipped. Do not reintroduce series playback/downloads, dynamic engines, alternate image providers or arbitrary local-directory scanning. Keep migration tolerant and preserve old personal media, original metadata and retired cloud objects.
 
-This project and everyone participating in it is governed by our commitment to:
-- Be respectful and inclusive
-- Welcome newcomers
-- Focus on constructive feedback
-- Respect different viewpoints and experiences
+## Distribution
 
-### How Can I Contribute?
-
-#### Reporting Bugs
-
-Before creating bug reports, please check the existing issues to avoid duplicates.
-
-**How to submit a good bug report:**
-- Use a clear and descriptive title
-- Describe the exact steps to reproduce the problem
-- Specify your macOS version and Mac model
-- Include screenshots if applicable
-
-#### Suggesting Enhancements
-
-Enhancement suggestions are tracked as GitHub issues.
-
-**How to submit an enhancement suggestion:**
-- Use a clear and descriptive title
-- Provide a detailed description of the proposed feature
-- Explain why this enhancement would be useful
-
-#### Pull Requests
-
-1. Fork the repo and create your branch from `main`
-2. If you've added code, add appropriate tests
-3. Ensure your code follows the existing code style
-4. Update documentation if needed
-5. Issue the pull request
-
-### Development Setup
-
-```bash
-git clone https://github.com/yourusername/WaifuX.git
-cd WaifuX
-```
-
-Open `WaifuX.xcodeproj` in Xcode 16 or later.
-
-### Coding Standards
-
-- Follow Swift style guidelines
-- Use meaningful variable names
-- Add comments for complex logic
-- Keep functions focused and small
-- Use SwiftUI best practices
-
----
-
-<a name="中文指南"></a>
-## 🇨🇳 中文指南
-
-### 行为准则
-
-本项目及所有参与者都致力于：
-- 相互尊重和包容
-- 欢迎新人
-- 专注于建设性反馈
-- 尊重不同的观点和经验
-
-### 如何贡献？
-
-#### 报告 Bug
-
-在创建 bug 报告之前，请先检查现有的 issues 以避免重复。
-
-**如何提交一个好的 bug 报告：**
-- 使用清晰、描述性的标题
-- 描述重现问题的确切步骤
-- 指定您的 macOS 版本和 Mac 型号
-- 如适用，请附上截图
-
-#### 建议新功能
-
-功能建议通过 GitHub issues 跟踪。
-
-**如何提交功能建议：**
-- 使用清晰、描述性的标题
-- 提供拟议功能的详细描述
-- 解释为什么这个功能会很有用
-
-#### 提交 Pull Request
-
-1. Fork 仓库并从 `main` 分支创建您的分支
-2. 如果您添加了代码，请添加适当的测试
-3. 确保您的代码遵循现有的代码风格
-4. 如有需要，更新文档
-5. 提交 Pull Request
-
-### 开发环境设置
-
-```bash
-git clone https://github.com/yourusername/WaifuX.git
-cd WaifuX
-```
-
-在 Xcode 16 或更高版本中打开 `WaifuX.xcodeproj`。
-
-### 编码规范
-
-- 遵循 Swift 风格指南
-- 使用有意义的变量名
-- 为复杂逻辑添加注释
-- 保持函数专注且精简
-- 使用 SwiftUI 最佳实践
-
----
-
-## 📋 Pull Request Process / Pull Request 流程
-
-1. Update the README.md with details of changes if applicable
-2. Update CONTRIBUTING.md if you're changing contribution guidelines
-3. Your PR will be reviewed by maintainers
-4. Once approved, it will be merged into the main branch
-
----
-
-## ❓ Questions? / 有问题？
-
-Feel free to open an issue for any questions or join our discussions.
-
-欢迎随时打开 issue 提出问题或加入讨论。
-
-Thank you for contributing! / 感谢您的贡献！
+Manual packaging creates local Debug development artifacts. Release helpers require a valid signing team; ad-hoc Release packaging is rejected. A public release additionally needs Developer ID signing, helper provisioning, notarization, matching Sparkle keys and hashes of the actual archives. Review the resulting feed and packages before publishing them.

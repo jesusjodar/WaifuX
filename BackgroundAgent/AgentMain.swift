@@ -171,7 +171,8 @@ private final class AgentConnectionListener: NSObject, NSXPCListenerDelegate {
     /// nil = 可信；否则返回拒绝原因（写进日志，下次导出能直接定案）。
     private func untrustedReason(_ connection: NSXPCConnection) -> String? {
         #if DEBUG
-        if BackgroundRuntimeRole.isIsolatedTest { return nil }
+        if BackgroundRuntimeRole.isIsolatedTest,
+           ProcessInfo.processInfo.environment["WAIFUX_HELPER_TEST_ENFORCE_HOST_IDENTITY"] != "1" { return nil }
         // Development builds can be unsigned. Still require the exact host executable.
         var path = [CChar](repeating: 0, count: 4096)
         guard proc_pidpath(connection.processIdentifier, &path, UInt32(path.count)) > 0 else {
@@ -277,12 +278,32 @@ private final class AgentApplicationDelegate: NSObject, NSApplicationDelegate {
 private enum AgentMain {
     @MainActor static func main() {
         signal(SIGPIPE, SIG_IGN)
+        if BackgroundRuntimeRole.isIsolatedTest {
+            URLCache.shared = URLCache(memoryCapacity: 8 * 1024 * 1024, diskCapacity: 0, diskPath: nil)
+        }
         if CommandLine.arguments.contains("--host-bundle-probe") { print(WaifuXHostBundle.bundleURL.path); return }
         if CommandLine.arguments.contains("--identity-probe") {
             let status = BackgroundAgentHello(protocolVersion: BackgroundAgentWire.protocolVersion, bundleIdentifier: Bundle.main.bundleIdentifier ?? "", processIdentifier: ProcessInfo.processInfo.processIdentifier, runtimeReady: false, buildIdentity: BackgroundAgentBuildIdentity.running())
             if let data = try? JSONEncoder().encode(status), let line = String(data: data, encoding: .utf8) { print(line) }
             return
         }
+        #if DEBUG
+        if CommandLine.arguments.contains("--wallhaven-cloud-regression") || CommandLine.arguments.contains("--wallhaven-migration-regression") {
+            guard BackgroundRuntimeRole.isIsolatedTest else { exit(2) }
+            let app = NSApplication.shared
+            app.setActivationPolicy(.accessory)
+            Task { @MainActor in
+                do {
+                    if CommandLine.arguments.contains("--wallhaven-cloud-regression") { try await WallhavenCloudIntegrationProbe.run() }
+                    else { try await WallhavenMigrationIntegrationProbe.run() }
+                    exit(0)
+                }
+                catch { print("HELPER_REGRESSION_FAILED \(error)"); exit(1) }
+            }
+            app.run()
+            return
+        }
+        #endif
         let app = NSApplication.shared
         app.setActivationPolicy(.accessory)
         let delegate = AgentApplicationDelegate()

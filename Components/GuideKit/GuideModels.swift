@@ -2,7 +2,6 @@ import SwiftUI
 import AppKit
 
 // MARK: - WaifuX GuideKit · 模型与锚点注册
-// 设计文档：Docs/Guide-Kit-Design.md
 // 锚点登记只存「窗口本地矩形（AppKit y 向上）+ 弱引用 window」；
 // 引擎播放每步时才 convertToScreen，窗口平移天然跟随。
 
@@ -18,40 +17,23 @@ enum GuideAnchorID: Hashable {
     /// 当前由引擎解析为主屏菜单栏右侧兜底区域。
     case menubarStatusItem
     // 静态壁纸探索
-    case exploreSourceMenu
     case exploreHeader
     case exploreRatioMenu
     case exploreScrollToTop
-    // 动态壁纸探索
-    case mediaSourceMenu
-    case mediaContentChips
-    case mediaResolutionMenu
-    // 番剧
-    case animeScrollToTop
-    case animeBackgroundPanel
-    case animeResetFilters
     // 我的库
     case libraryEditButton
     case librarySearchControl
-    // 详情页（Media / Wallpaper 两个 sheet 共用）
+    // 详情页（Wallpaper 详情页）
     case detailHeroInfo
-    case libraryImportButton
     case libraryMoreMenuButton
     // 详情页·信息行的作者胶囊（点开作者面板）
     case detailAuthorLink
-    // 顶部标签栏（首页/壁纸/媒体/动漫/我的）
+    // 顶部标签栏（首页/壁纸/我的图库）
     case homeTabBar
-    // 设置页·动态锁屏区块
-    case lockscreenToggle
-    case lockscreenStatusRow
-    // 设置页·左侧导航十个分类
+    // 设置页·左侧导航分类
     case settingsTabGeneral
-    case settingsTabModules
     case settingsTabDownload
     case settingsTabWallhaven
-    case settingsTabWorkshop
-    case settingsTabPixiv
-    case settingsTabKonachan
     case settingsTabScheduler
     case settingsTabSync
     case settingsTabAbout
@@ -62,7 +44,6 @@ enum GuideAnchorID: Hashable {
     case authorSheetHeader
     // 探索页搜索行三个快捷圆钮（链接导入 / 氛围背景 / 重置筛选）
     case exploreActionCircles
-    case mediaActionCircles
 }
 
 /// 导览步骤。anchor 为 nil 表示无目标居中文字卡（如欢迎步）。

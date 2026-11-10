@@ -74,7 +74,6 @@ struct WallpaperDetailSheet: View {
     @State private var showCopyLinkToast = false
     /// 本次复制动作的 toast 文案（复制链接 / 复制图片共用同一 toast 位）
     @State private var copyToastMessage = ""
-    @State private var showDSHBackgroundToast = false
     @State private var showMoreOptionsPopover = false
 
     // MARK: - 作者壁纸弹窗相关
@@ -84,9 +83,7 @@ struct WallpaperDetailSheet: View {
     @State private var authorWallpapersPage = 1
     @State private var hasMoreAuthorWallpapers = true
     /// 已加载的作者标识，防止面板已打开时重复加载。
-    /// Wallhaven 使用用户名，Pixiv 使用用户 ID。
     @State private var authorLoadedIdentifier: String?
-    @State private var authorSource: String?
     /// 缓存当前作者 uploader，避免切换壁纸时因新壁纸无 uploader 导致面板闪退
     @State private var cachedAuthorUploader: Wallpaper.Uploader?
     /// 从作者面板切换时使用淡入淡出过渡（而非滑动）
@@ -290,20 +287,6 @@ struct WallpaperDetailSheet: View {
                         .padding(.bottom, 48)
                         .transition(.move(edge: .bottom).combined(with: .opacity))
                         .animation(.spring(response: 0.35, dampingFraction: 0.85), value: showCopyLinkToast)
-                } else if showDSHBackgroundToast {
-                    Text(t("dshHarness.applied"))
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(.white)
-                        .padding(.horizontal, 20)
-                        .padding(.vertical, 10)
-                        .background(
-                            Capsule()
-                                .fill(.ultraThinMaterial)
-                                .overlay(Capsule().stroke(.white.opacity(0.12), lineWidth: 0.5))
-                        )
-                        .padding(.bottom, 48)
-                        .transition(.move(edge: .bottom).combined(with: .opacity))
-                        .animation(.spring(response: 0.35, dampingFraction: 0.85), value: showDSHBackgroundToast)
                 }
             }
         }
@@ -792,6 +775,24 @@ struct WallpaperDetailSheet: View {
                 }
             }
 
+            if let local = viewModel.localFileURLIfAvailable(for: wallpaper),
+               CurrentWallpaperService.shared.isCurrentWallpaper(localFileURL: local) {
+                Menu {
+                    ForEach(NSScreen.screens.filter { screen in
+                        guard let active = CurrentWallpaperService.shared.activeURL(for: screen.wallpaperScreenIdentifier) else { return false }
+                        return DesktopWallpaperSyncManager.shared.originalSourceURL(for: active).standardizedFileURL == local.standardizedFileURL
+                    }, id: \.wallpaperScreenIdentifier) { screen in
+                        Button(screen.localizedName) {
+                            CropAdjustOverlayController.shared.toggle(for: screen, statusBarItemRef: nil)
+                        }
+                    }
+                } label: {
+                    Image(systemName: "crop").font(.system(size: 16)).frame(width: 40, height: 40)
+                }
+                .menuStyle(.borderlessButton)
+                .help(t("statusbar.cropAdjust"))
+            }
+
             // 主按钮
             Button {
                 setAsDesktopWallpaper()
@@ -1259,7 +1260,7 @@ struct WallpaperDetailSheet: View {
 
     private var wallpaperTitle: String {
         let meaningfulTag = wallpaper.tags?.first(where: { !$0.name.isEmpty && $0.name.lowercased() != "wallpaper" })?.name
-        return meaningfulTag ?? "Wallpaper \(wallpaper.id.uppercased())"
+        return meaningfulTag ?? "Wallhaven \(wallpaper.id.uppercased())"
     }
 
     private var sourceLabel: String {
@@ -1285,16 +1286,9 @@ struct WallpaperDetailSheet: View {
         return sourceLabel
     }
 
-    private var isPixivWallpaper: Bool {
-        wallpaper.source?.caseInsensitiveCompare("pixiv") == .orderedSame
-    }
 
-    private var authorIdentifier: String? {
-        if isPixivWallpaper {
-            return wallpaper.pixivAuthorID
-        }
-        return wallpaper.uploader?.username
-    }
+
+    private var authorIdentifier: String? { wallpaper.uploader?.username }
 
     private var canOpenAuthorSheet: Bool {
         wallpaper.uploader != nil && authorIdentifier != nil
@@ -1344,8 +1338,7 @@ struct WallpaperDetailSheet: View {
     }
 
     private func formatFileSize(_ bytes: Int) -> String {
-        let mb = Double(bytes) / 1024 / 1024
-        return String(format: "%.0f mb", mb)
+        ByteCountFormatter.string(fromByteCount: Int64(max(0, bytes)), countStyle: .file)
     }
 
     private var detailCategoryBadge: some View {
@@ -1421,25 +1414,7 @@ struct WallpaperDetailSheet: View {
 
     /// 调用 Wallhaven 详情 API 获取完整数据（含 uploader），更新当前壁纸
     private func fetchDetailAndUpdateUploader() {
-        if isPixivWallpaper {
-            guard wallpaper.uploader == nil || wallpaper.pixivAuthorID == nil else { return }
-            let rawID = wallpaper.id.replacingOccurrences(of: "pixiv_", with: "")
-            guard !rawID.isEmpty else { return }
 
-            Task {
-                do {
-                    let detail = try await PixivService.shared.illustDetail(id: rawID)
-                    await MainActor.run {
-                        guard resolvedWallpaper.id == "pixiv_\(rawID)" else { return }
-                        resolvedWallpaper = detail.toWallpaper()
-                    }
-                } catch {
-                    AppLogger.warn(.wallpaper, "获取 Pixiv 作品详情失败（不影响浏览）",
-                        metadata: ["wallpaperID": wallpaper.id, "error": error.localizedDescription])
-                }
-            }
-            return
-        }
 
         // 已有 uploader 则跳过
         if wallpaper.uploader != nil { return }
@@ -1475,8 +1450,7 @@ struct WallpaperDetailSheet: View {
                             path: updated.path,
                             thumbs: updated.thumbs,
                             tags: updated.tags,
-                            uploader: detail.uploader,
-                            pixivAuthorID: updated.pixivAuthorID
+                            uploader: detail.uploader
                         )
                         resolvedWallpaper = newWallpaper
                         AppLogger.info(.wallpaper, "详情 API 返回 uploader",
@@ -1525,95 +1499,33 @@ struct WallpaperDetailSheet: View {
     }
 
     private func setAsDesktopWallpaper() {
-        // 检测多显示器
-        let screens = NSScreen.screens
-        // DeepSeek Harness 在线时单屏也要弹选择器，否则「推送到 Harness」对单屏用户不可达
-        let dshAvailable = DSHHarnessBridge.shared.availability.isAvailable
-        if screens.count > 1 || dshAvailable {
-            // 多显示器环境下显示选择弹窗
-            // selectedScreen == nil 表示"所有显示器"，非 nil 表示特定显示器
+        if NSScreen.screens.count > 1 {
             DisplaySelectorManager.shared.showSelector(
-                title: t("setWallpaper"),
-                message: screens.count > 1 ? t("multiDisplayDetected") : t("setWallpaper.chooseTarget"),
-                onSelectDSH: { [self] in applyToDeepSeekHarness() }
-            ) { [self] selectedScreen in
-                isSettingWallpaper = true
-                errorMessage = ""
-                Task { @MainActor in
-                    let targetScreenIDs = Set(
-                        (selectedScreen.map { [$0] } ?? NSScreen.screens)
-                            .map(\.wallpaperScreenIdentifier)
-                    )
-                    do {
-                        await WallpaperSchedulerService.shared.beginManualWallpaperApply()
-                        let imageURL = try await getWallpaperImageURLForSetting()
-                        // selectedScreen == nil → 所有显示器；非 nil → 仅指定显示器
-                        // viewModel 内部会按需停止对应屏幕的动态壁纸
-                        try await viewModel.setWallpaper(from: imageURL, option: .desktop, for: selectedScreen)
-                        WallpaperSchedulerService.shared.notifyManualWallpaperChange(screenID: selectedScreen?.wallpaperScreenIdentifier)
-                        isSettingWallpaper = false
-                    } catch {
-                        WallpaperSchedulerService.shared.completeManualWallpaperApply(
-                            success: false,
-                            screenIDs: targetScreenIDs
-                        )
-                        errorMessage = "\(t("error")): \(error.localizedDescription)"
-                        showError = true
-                        print("Set wallpaper error: \(error)")
-                        isSettingWallpaper = false
-                    }
-                }
-            }
+                title: t("setWallpaper"), message: t("multiDisplayDetected")
+            ) { screen in applyToDesktop(screen: screen) }
         } else {
-            // 单显示器环境下直接设置
-            isSettingWallpaper = true
-            errorMessage = ""
-            Task { @MainActor in
-                let targetScreenIDs = Set(NSScreen.screens.map(\.wallpaperScreenIdentifier))
-                do {
-                    await WallpaperSchedulerService.shared.beginManualWallpaperApply()
-                    let imageURL = try await getWallpaperImageURLForSetting()
-                    // viewModel 内部会按需停止动态壁纸
-                    try await viewModel.setWallpaper(from: imageURL, option: .desktop)
-                    WallpaperSchedulerService.shared.notifyManualWallpaperChange(
-                        screenID: NSScreen.screens.first?.wallpaperScreenIdentifier
-                    )
-                } catch {
-                    WallpaperSchedulerService.shared.completeManualWallpaperApply(
-                        success: false,
-                        screenIDs: targetScreenIDs
-                    )
-                    errorMessage = "\(t("error")): \(error.localizedDescription)"
-                    showError = true
-                    print("Set wallpaper error: \(error)")
-                }
-                isSettingWallpaper = false
+            applyToDesktop(screen: NSScreen.screens.first)
+        }
+    }
+
+    private func applyToDesktop(screen: NSScreen?) {
+        guard !isSettingWallpaper else { return }
+        isSettingWallpaper = true
+        errorMessage = ""
+        Task { @MainActor in
+            defer { isSettingWallpaper = false }
+            do {
+                let imageURL = try await getWallpaperImageURLForSetting()
+                try await viewModel.setWallpaper(from: imageURL, option: .desktop, for: screen)
+            } catch {
+                errorMessage = error.localizedDescription
+                showError = true
             }
         }
     }
 
     /// 推送到 DeepSeek Harness 作为界面背景（不动桌面壁纸）。
-    private func applyToDeepSeekHarness() {
-        isSettingWallpaper = true
-        errorMessage = ""
-        Task { @MainActor in
-            do {
-                let imageURL = try await getWallpaperImageURLForSetting()
-                let media = DSHMediaResolver.media(for: imageURL) ?? .image(imageURL)
-                try await DSHHarnessBridge.shared.setBackground(media: media)
-                showDSHBackgroundToast = true
-                DispatchQueue.main.asyncAfter(deadline: .now() + 2.2) {
-                    showDSHBackgroundToast = false
-                }
-            } catch {
-                errorMessage = "\(t("error")): \(error.localizedDescription)"
-                showError = true
-                AppLogger.error(.wallpaper, "推送到 DeepSeek Harness 失败",
-                                metadata: ["error": error.localizedDescription])
-            }
-            isSettingWallpaper = false
-        }
-    }
+
 
     /// 设为壁纸必须使用资料库中的本地文件；预览流程仍使用下方的临时文件路径。
     private func getWallpaperImageURLForSetting() async throws -> URL {
@@ -1622,15 +1534,6 @@ struct WallpaperDetailSheet: View {
 
     /// 获取壁纸图片 URL（本地/已下载文件直接返回，未下载的网络壁纸才下载到临时目录）
     private func getWallpaperImageURL() async throws -> URL {
-        // 本地壁纸：直接使用本地文件路径
-        if wallpaper.id.hasPrefix("local_"),
-           let localURL = wallpaper.fullImageURL,
-           localURL.isFileURL,
-           FileManager.default.fileExists(atPath: localURL.path) {
-            print("[WallpaperDetailSheet] Using local wallpaper file: \(localURL.path)")
-            return localURL
-        }
-
         // 已下载的网络壁纸：直接使用本地已下载的文件，避免重复联网下载
         if let downloadedURL = viewModel.localFileURLIfAvailable(for: wallpaper) {
             print("[WallpaperDetailSheet] Using downloaded wallpaper file: \(downloadedURL.path)")
@@ -1814,7 +1717,7 @@ struct WallpaperDetailSheet: View {
                 if self.showError || self.showDeleteConfirm { return event }
                 if DisplaySelectorManager.shared.isShowingSelector {
                     // 显示器选择弹窗盖在详情页上，Esc 先关它，不能直接退出详情页
-                    DisplaySelectorManager.shared.handleCancel()
+                    DisplaySelectorManager.shared.handleCancel(requestID: DisplaySelectorManager.shared.requestID)
                 } else if self.showAuthorSheet {
                     self.dismissAuthorSheet()
                 } else if PreviewWindowManager.shared.isPresented {
@@ -1866,7 +1769,7 @@ struct WallpaperDetailSheet: View {
         if showAuthorSheet, let uploader = cachedAuthorUploader {
             AuthorWallpaperSheet(
                 uploader: uploader,
-                sourceName: authorSource?.caseInsensitiveCompare("pixiv") == .orderedSame ? "Pixiv" : "wallhaven",
+                sourceName: "wallhaven",
                 contentTitle: t("authorWallpapers"),
                 wallpapers: authorWallpapers,
                 isLoading: isLoadingAuthorWallpapers,
@@ -1900,10 +1803,8 @@ struct WallpaperDetailSheet: View {
               let identifier = authorIdentifier else { return }
         // 面板已打开且同一作者时，不重复加载
         if showAuthorSheet && identifier == authorLoadedIdentifier { return }
-        let isPixivAuthor = isPixivWallpaper
         showAuthorSheet = true
         authorLoadedIdentifier = identifier
-        authorSource = wallpaper.source
         cachedAuthorUploader = uploader
         authorWallpapers = []
         authorWallpapersPage = 1
@@ -1913,19 +1814,13 @@ struct WallpaperDetailSheet: View {
         Task {
             do {
                 let page: WallpaperViewModel.AuthorPageResult
-                if isPixivAuthor {
-                    page = try await viewModel.fetchPixivWallpapersByAuthor(
-                        userID: identifier,
-                        page: 1,
-                        limit: 24
-                    )
-                } else {
+
                     page = try await viewModel.fetchWallpapersByAuthor(
                         username: uploader.username,
                         page: 1,
                         limit: 24
                     )
-                }
+
                 await MainActor.run {
                     authorWallpapers = page.items
                     hasMoreAuthorWallpapers = page.hasMore
@@ -1933,7 +1828,7 @@ struct WallpaperDetailSheet: View {
                 }
             } catch {
                 AppLogger.error(.wallpaper, "加载作者壁纸失败",
-                    metadata: ["author": identifier, "source": isPixivAuthor ? "pixiv" : "wallhaven", "error": error.localizedDescription])
+                    metadata: ["author": identifier, "source": "wallhaven", "error": error.localizedDescription])
                 await MainActor.run {
                     isLoadingAuthorWallpapers = false
                 }
@@ -1948,7 +1843,6 @@ struct WallpaperDetailSheet: View {
         hasMoreAuthorWallpapers = true
         isLoadingAuthorWallpapers = false
         authorLoadedIdentifier = nil
-        authorSource = nil
         cachedAuthorUploader = nil
     }
 
@@ -1973,36 +1867,25 @@ struct WallpaperDetailSheet: View {
         var identityKeys = Set(wallpapers.flatMap { LibraryFolderStore.wallpaperAuthorIdentityKeys($0) })
         if let identifier = authorLoadedIdentifier?.trimmingCharacters(in: .whitespacesAndNewlines),
            !identifier.isEmpty {
-            if authorSource?.caseInsensitiveCompare("pixiv") == .orderedSame {
-                identityKeys.insert("pixiv:\(identifier)")
-            } else {
+
                 identityKeys.insert("name:\(identifier.lowercased())")
-            }
+
         }
         let trimmedAuthorName = authorName.trimmingCharacters(in: .whitespacesAndNewlines)
         if !trimmedAuthorName.isEmpty {
             identityKeys.insert("name:\(trimmedAuthorName.lowercased())")
         }
 
-        // 列表接口常缺 uploader / pixivAuthorID；写入下载记录前补齐，便于后续按作者身份复用文件夹
         let authorUploader = cachedAuthorUploader
             ?? wallpapers.first(where: { $0.uploader != nil })?.uploader
             ?? Wallpaper.Uploader(
                 username: authorName,
-                group: authorSource?.caseInsensitiveCompare("pixiv") == .orderedSame ? "pixiv" : "wallhaven",
+                group: "wallhaven",
                 avatar: Wallpaper.Avatar(px200: "", px128: "", px32: "", px20: "")
             )
-        let pixivAuthorID: String? = {
-            if authorSource?.caseInsensitiveCompare("pixiv") == .orderedSame {
-                return authorLoadedIdentifier
-            }
-            return wallpapers.first(where: { $0.pixivAuthorID != nil })?.pixivAuthorID
-        }()
-        let isPixivAuthor = authorSource?.caseInsensitiveCompare("pixiv") == .orderedSame
-        let pixivUserID = authorLoadedIdentifier
         let wallhavenUsername = authorUploader.username
         let stampedWallpapers = wallpapers.map {
-            $0.stampingAuthor(uploader: authorUploader, pixivAuthorID: pixivAuthorID)
+            $0.stampingAuthor(uploader: authorUploader)
         }
 
         Task { @MainActor in
@@ -2050,19 +1933,13 @@ struct WallpaperDetailSheet: View {
                 isLoadingAuthorWallpapers = true
                 do {
                     let page: WallpaperViewModel.AuthorPageResult
-                    if isPixivAuthor {
-                        page = try await viewModel.fetchPixivWallpapersByAuthor(
-                            userID: pixivUserID ?? "",
-                            page: nextPage,
-                            limit: 24
-                        )
-                    } else {
+
                         page = try await viewModel.fetchWallpapersByAuthor(
                             username: wallhavenUsername,
                             page: nextPage,
                             limit: 24
                         )
-                    }
+
 
                     let existingIDs = Set(authorWallpapers.map(\.id))
                     let fresh = page.items.filter {
@@ -2072,7 +1949,7 @@ struct WallpaperDetailSheet: View {
                     authorWallpapersPage = nextPage
                     hasMoreAuthorWallpapers = page.hasMore && !fresh.isEmpty
                     batch = fresh.map {
-                        $0.stampingAuthor(uploader: authorUploader, pixivAuthorID: pixivAuthorID)
+                        $0.stampingAuthor(uploader: authorUploader)
                     }
                     shouldLoadNextPage = hasMoreAuthorWallpapers
                     nextPage += 1
@@ -2177,24 +2054,17 @@ struct WallpaperDetailSheet: View {
               hasMoreAuthorWallpapers else { return }
         isLoadingAuthorWallpapers = true
         let nextPage = authorWallpapersPage + 1
-        let isPixivAuthor = authorSource?.caseInsensitiveCompare("pixiv") == .orderedSame
 
         Task {
             do {
                 let page: WallpaperViewModel.AuthorPageResult
-                if isPixivAuthor {
-                    page = try await viewModel.fetchPixivWallpapersByAuthor(
-                        userID: identifier,
-                        page: nextPage,
-                        limit: 24
-                    )
-                } else {
+
                     page = try await viewModel.fetchWallpapersByAuthor(
                         username: uploader.username,
                         page: nextPage,
                         limit: 24
                     )
-                }
+
                 await MainActor.run {
                     // 去重追加，避免跨页重复项
                     let existingIDs = Set(authorWallpapers.map(\.id))
@@ -2207,7 +2077,7 @@ struct WallpaperDetailSheet: View {
                 }
             } catch {
                 AppLogger.error(.wallpaper, "加载更多作者壁纸失败",
-                    metadata: ["author": identifier, "source": isPixivAuthor ? "pixiv" : "wallhaven", "page": nextPage, "error": error.localizedDescription])
+                    metadata: ["author": identifier, "source": "wallhaven", "page": nextPage, "error": error.localizedDescription])
                 await MainActor.run {
                     isLoadingAuthorWallpapers = false
                 }

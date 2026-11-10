@@ -103,27 +103,5 @@ struct GuessYouLikeCardOverlayContent: View {
         )
     }
 
-    private var sourceColor: Color {
-        switch item.sourceName {
-        case "WallHaven": return Color(hex: "FF6B6B")
-        case "PixelVault": return Color(hex: "4ECDC4")
-        case "MotionBG": return Color(hex: "45B7D1")
-        case "Wallpaper Engine": return Color(hex: "96CEB4")
-        case "DongTai": return Color(hex: "F472B6")
-        case "Wallsflow": return Color(hex: "9B5DE5")
-        default: return Color(hex: "DDA0DD")
-        }
-    }
-}
-
-// MARK: - 预览
-
-#Preview {
-    GuessYouLikeCardOverlayContent(
-        item: GuessYouLikeItem.mockItems()[0],
-        onDetail: { _ in },
-        onDownload: { _ in }
-    )
-    .frame(width: 260, height: 360)
-    .background(Color(hex: "0D0D0D"))
+    private var sourceColor: Color { Color(hex: "FF6B6B") }
 }

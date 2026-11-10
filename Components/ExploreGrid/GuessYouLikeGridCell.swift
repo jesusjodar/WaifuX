@@ -56,7 +56,7 @@ final class GuessYouLikeGridCell: ExploreGridItem {
     private lazy var overlayHost: NSHostingView<GuessYouLikeCardOverlayContent> = {
         let host = NSHostingView(
             rootView: GuessYouLikeCardOverlayContent(
-                item: GuessYouLikeItem.mockItems()[0],
+                item: GuessYouLikeItem(id: "", title: "", subtitle: "", imageURL: "", destination: "", contentType: .wallpaper, sourceName: "Wallhaven"),
                 onDetail: { _ in },
                 onDownload: { _ in }
             )

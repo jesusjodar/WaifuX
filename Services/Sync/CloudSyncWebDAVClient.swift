@@ -17,10 +17,13 @@ final actor CloudSyncWebDAVClient {
     static let shared = CloudSyncWebDAVClient()
 
     private let session: URLSession
-    private let decoder = JSONDecoder()
 
     private init() {
         let config = URLSessionConfiguration.default
+        // Metadata and manifests are mutable across devices. Every sync must
+        // read the server, including when updates share a Last-Modified second.
+        config.requestCachePolicy = .reloadIgnoringLocalCacheData
+        config.urlCache = nil
         config.timeoutIntervalForRequest = 30
         config.timeoutIntervalForResource = 120
         session = URLSession(configuration: config)
@@ -30,7 +33,7 @@ final actor CloudSyncWebDAVClient {
 
     /// 为请求添加 Basic Auth header
     private func authorizedRequest(url: URL, credentials: WebDAVCredentials) -> URLRequest {
-        var req = URLRequest(url: url)
+        var req = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData)
         let authStr = "\(credentials.username):\(credentials.password)"
         guard let authData = authStr.data(using: .utf8) else { return req }
         let base64 = authData.base64EncodedString()
@@ -65,34 +68,6 @@ final actor CloudSyncWebDAVClient {
         return resources
     }
 
-    /// 递归 PROPFIND（Deep scan，用于 GC 和全量扫描）
-    func recursivePropFind(
-        url: URL,
-        credentials: WebDAVCredentials
-    ) async throws -> [WebDAVResource] {
-        var allResources: [WebDAVResource] = []
-        var urlsToScan = [url]
-
-        while !urlsToScan.isEmpty {
-            let current = urlsToScan.removeFirst()
-            let resources = try await propFind(url: current, credentials: credentials, depth: 1)
-
-            // 收集新的子目录继续扫描
-            for resource in resources {
-                if resource.isCollection, resource.href != current.lastPathComponent + "/" {
-                    // 跳过自身条目，只入队子目录
-                    let subURL = buildAbsoluteURL(base: current, href: resource.href)
-                    if subURL != current {
-                        urlsToScan.append(subURL)
-                    }
-                }
-                allResources.append(resource)
-            }
-        }
-
-        return allResources
-    }
-
     // MARK: - GET（下载文件）
 
     func get(
@@ -123,23 +98,6 @@ final actor CloudSyncWebDAVClient {
         try checkResponse(response, url: url)
     }
 
-    // MARK: - DELETE（删除文件/目录）
-
-    func delete(
-        url: URL,
-        credentials: WebDAVCredentials
-    ) async throws {
-        var req = authorizedRequest(url: url, credentials: credentials)
-        req.httpMethod = "DELETE"
-
-        let (_, response) = try await session.data(for: req)
-        // 404 视为已删除
-        if let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 404 {
-            return
-        }
-        try checkResponse(response, url: url)
-    }
-
     // MARK: - MKCOL（创建目录）
 
     func mkcol(
@@ -163,7 +121,7 @@ final actor CloudSyncWebDAVClient {
     /// 检查 HTTP 响应
     private func checkResponse(_ response: URLResponse, url: URL) throws {
         guard let httpResponse = response as? HTTPURLResponse else {
-            throw CloudSyncError.webDAVProtocolError(reason: "非 HTTP 响应")
+            throw CloudSyncError.webDAVProtocolError(reason: LocalizationService.shared.t("非 HTTP 响应"))
         }
 
         switch httpResponse.statusCode {
@@ -219,7 +177,7 @@ final actor CloudSyncWebDAVClient {
         let parser = WebDAVXMLParser(data: data)
         if !parser.parse() {
             throw CloudSyncError.webDAVProtocolError(
-                reason: "PROPFIND XML 解析失败"
+                reason: LocalizationService.shared.t("PROPFIND XML 解析失败")
             )
         }
         return parser.resources

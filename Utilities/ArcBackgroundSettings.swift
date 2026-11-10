@@ -19,8 +19,8 @@ enum ArcThemeMode: String, CaseIterable, Identifiable {
 
     var label: String {
         switch self {
-        case .light: return "浅色"
-        case .dark: return "深色"
+        case .light: return t("浅色")
+        case .dark: return t("深色")
         }
     }
 }
@@ -51,8 +51,6 @@ final class ArcBackgroundSettings: ObservableObject {
     // MARK: - 探索页独立颗粒强度（各自持久化）
 
     @Published var exploreGrainWallpaper: Double = 0.5
-    @Published var exploreGrainAnime: Double = 0.5
-    @Published var exploreGrainMedia: Double = 0.5
     /// 当前实际是否为浅色模式（只读，由 themeMode + 系统主题计算）
     @Published private(set) var isLightMode: Bool = false
 
@@ -102,9 +100,7 @@ final class ArcBackgroundSettings: ObservableObject {
             $dotGridOpacity.map { _ in () }.eraseToAnyPublisher(),
             $useNoiseTexture.map { _ in () }.eraseToAnyPublisher(),
             $compactMode.map { _ in () }.eraseToAnyPublisher(),
-            $exploreGrainWallpaper.map { _ in () }.eraseToAnyPublisher(),
-            $exploreGrainAnime.map { _ in () }.eraseToAnyPublisher(),
-            $exploreGrainMedia.map { _ in () }.eraseToAnyPublisher()
+            $exploreGrainWallpaper.map { _ in () }.eraseToAnyPublisher()
         )
         .debounce(for: .seconds(0.3), scheduler: RunLoop.main)
         .sink { [weak self] in
@@ -207,10 +203,6 @@ final class ArcBackgroundSettings: ObservableObject {
         // 探索页独立颗粒强度
         let gw = defaults.double(forKey: "explore_grain_wallpaper")
         exploreGrainWallpaper = gw > 0 ? gw : 0.5
-        let ga = defaults.double(forKey: "explore_grain_anime")
-        exploreGrainAnime = ga > 0 ? ga : 0.5
-        let gm = defaults.double(forKey: "explore_grain_media")
-        exploreGrainMedia = gm > 0 ? gm : 0.5
     }
 
     private func saveSettings() {
@@ -225,8 +217,6 @@ final class ArcBackgroundSettings: ObservableObject {
         defaults.set(compactMode, forKey: "arc_compact_mode")
         // 探索页独立颗粒强度
         defaults.set(exploreGrainWallpaper, forKey: "explore_grain_wallpaper")
-        defaults.set(exploreGrainAnime, forKey: "explore_grain_anime")
-        defaults.set(exploreGrainMedia, forKey: "explore_grain_media")
     }
 }
 

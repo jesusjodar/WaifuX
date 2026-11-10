@@ -329,7 +329,7 @@ struct ArcAtmosphereBackground: View {
     let useNoise: Bool
     /// 颗粒度强度（0.0~1.0），控制噪点纹理的可见度
     let grainIntensity: Double
-    /// 动态壁纸正在播放或列表高速滚动时启用：减少大半径模糊、噪点与图片散射，降低 WindowServer/GPU 压力。
+    /// 列表高速滚动时启用：减少大半径模糊、噪点与图片散射，降低 WindowServer/GPU 压力。
     var lightweight: Bool = false
 
     /// 使用传入的 tint 颜色（来自各页首张卡片采样），让每个探索页背景色独立

@@ -3,8 +3,7 @@ import IOKit.pwr_mgt
 
 /// 阻止系统息屏 / 空闲休眠。
 ///
-/// 支持多来源叠加：用户「永不休眠」设置与媒体播放可同时持有。
-/// 仅当全部来源释放后，才恢复系统默认息屏策略。
+/// Holds a power assertion only while the explicit user setting is enabled.
 @MainActor
 final class SleepPreventer {
     static let shared = SleepPreventer()
@@ -12,8 +11,6 @@ final class SleepPreventer {
     enum Reason: Hashable {
         /// 通用设置中的「永不休眠」开关
         case userSetting
-        /// 番剧 / 视频播放期间
-        case mediaPlayback
     }
 
     private var activeReasons: Set<Reason> = []
@@ -36,16 +33,6 @@ final class SleepPreventer {
             activeReasons.remove(reason)
         }
         syncAssertions()
-    }
-
-    /// 播放视频时调用（兼容既有调用点）
-    func startPreventingSleep() {
-        setPreventingSleep(true, reason: .mediaPlayback)
-    }
-
-    /// 停止播放时调用（兼容既有调用点；不会影响用户设置持有的 assertion）
-    func stopPreventingSleep() {
-        setPreventingSleep(false, reason: .mediaPlayback)
     }
 
     // MARK: - Assertion lifecycle
@@ -110,10 +97,5 @@ final class SleepPreventer {
         }
     }
 
-    private func assertionReasonText() -> String {
-        if activeReasons.contains(.userSetting) {
-            return "WaifuX 永不休眠"
-        }
-        return "WaifuX 正在播放视频"
-    }
+    private func assertionReasonText() -> String { t("WaifuX 永不休眠") }
 }

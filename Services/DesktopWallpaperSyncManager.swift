@@ -17,6 +17,7 @@ final class DesktopWallpaperSyncManager {
     static let registrationDidChangeNotification = Notification.Name("com.waifux.desktopRegistrationDidChange")
 
     /// 每个屏幕最后通过 WaifuX 设置的静态壁纸 URL（key 为 screenID）
+    private var sourcePathByImagePath: [String: String] = [:]
     private var lastSetImageURLByScreen: [String: URL] = [:]
     /// 每个物理显示器指纹最后设置的静态壁纸 URL，用于外接屏重连后 screenID 变化时恢复。
     private var lastSetImageURLByFingerprint: [String: URL] = [:]
@@ -51,6 +52,7 @@ final class DesktopWallpaperSyncManager {
         if BackgroundRuntimeRole.isRemoteUI {
             BackgroundRuntimeBridge.observe { [weak self] snapshot in
                 guard let self, let values = snapshot["desktop"] as? [String: Any] else { return }
+                sourcePathByImagePath = values["sources"] as? [String: String] ?? [:]
                 lastSetImageURLByScreen = (values["screens"] as? [String: String] ?? [:]).compactMapValues(URL.init(string:))
                 lastSetImageURLByFingerprint = (values["fingerprints"] as? [String: String] ?? [:]).compactMapValues(URL.init(string:))
             }
@@ -83,13 +85,59 @@ final class DesktopWallpaperSyncManager {
         )
 
         // 恢复持久化的指纹 -> 壁纸 URL 映射，供外接屏重连后判断是否曾由 App 设过壁纸
+        sourcePathByImagePath = WaifuXPreferences.shared.dictionary(forKey: "desktop_wallpaper_static_sources_v1") as? [String: String] ?? [:]
         loadFingerprintState()
         loadOriginalFingerprintState()
-        purgeLegacyRendererCaptureState()
+    }
+
+    /// Rebind only files actually copied by the static migration. The prior
+    /// system wallpaper is untouched unless it was one of those same files.
+    func rebaseLibraryPaths(from oldRoot: URL, to newRoot: URL, relativePaths: Set<String>) throws {
+        let moved = Set(relativePaths.map { oldRoot.appendingPathComponent($0).standardizedFileURL.resolvingSymlinksInPath().path })
+        func rebased(_ url: URL) -> URL {
+            guard url.isFileURL, moved.contains(url.standardizedFileURL.resolvingSymlinksInPath().path),
+                  let path = WallpaperLibraryPath.rebase(url.path, from: oldRoot.path, to: newRoot.path) else { return url }
+            return URL(fileURLWithPath: path)
+        }
+        var changedScreens: [(NSScreen, URL, [NSWorkspace.DesktopImageOptionKey: Any])] = []
+        if BackgroundRuntimeRole.allowsDesktopRendering {
+            do {
+                for screen in NSScreen.screens {
+                    guard let owned = imageURL(for: screen), moved.contains(owned.standardizedFileURL.resolvingSymlinksInPath().path),
+                          let current = NSWorkspace.shared.desktopImageURL(for: screen),
+                          current.standardizedFileURL == owned.standardizedFileURL else { continue }
+                    let next = rebased(owned)
+                    let options = NSWorkspace.shared.desktopImageOptions(for: screen) ?? [:]
+                    try NSWorkspace.shared.setDesktopImageURLForAllSpaces(next, for: screen, options: options)
+                    changedScreens.append((screen, current, options))
+                }
+            } catch {
+                for (screen, url, options) in changedScreens.reversed() {
+                    try? NSWorkspace.shared.setDesktopImageURLForAllSpaces(url, for: screen, options: options)
+                }
+                throw error
+            }
+        }
+        lastSetImageURLByScreen = lastSetImageURLByScreen.mapValues(rebased)
+        lastSetImageURLByFingerprint = lastSetImageURLByFingerprint.mapValues(rebased)
+        originalImageURLByFingerprint = originalImageURLByFingerprint.mapValues(rebased)
+        var sources: [String: String] = [:]
+        for (image, source) in sourcePathByImagePath {
+            let nextImage = rebased(URL(fileURLWithPath: image)).path
+            let sourceWasMoved = moved.contains(URL(fileURLWithPath: source).standardizedFileURL.resolvingSymlinksInPath().path)
+            let imageWasMoved = nextImage != image
+            let nextSource = sourceWasMoved || imageWasMoved
+                ? WallpaperLibraryPath.rebase(source, from: oldRoot.path, to: newRoot.path) ?? source : source
+            sources[nextImage] = nextSource
+        }
+        sourcePathByImagePath = sources
+        WaifuXPreferences.shared.set(sources, forKey: "desktop_wallpaper_static_sources_v1")
+        persistOriginalFingerprintState()
+        persistFingerprintState()
     }
 
     func backgroundSnapshot() -> [String: Any] {
-        ["screens": lastSetImageURLByScreen.mapValues(\.absoluteString), "fingerprints": lastSetImageURLByFingerprint.mapValues(\.absoluteString)]
+        ["screens": lastSetImageURLByScreen.mapValues(\.absoluteString), "fingerprints": lastSetImageURLByFingerprint.mapValues(\.absoluteString), "sources": sourcePathByImagePath]
     }
 
     /// 在 WaifuX 首次改写某屏系统壁纸前，记录当时的系统桌面图。
@@ -166,19 +214,13 @@ final class DesktopWallpaperSyncManager {
     ///   - url: 壁纸图片 URL
     ///   - screen: 目标屏幕；nil 表示注册到所有当前屏幕
     ///   - options: 设置选项
-    func registerWallpaperSet(_ url: URL, for screen: NSScreen? = nil, options: [NSWorkspace.DesktopImageOptionKey: Any] = [:]) {
+    func registerWallpaperSet(_ url: URL, for screen: NSScreen? = nil, options: [NSWorkspace.DesktopImageOptionKey: Any] = [:], sourceURL: URL? = nil) {
         if BackgroundRuntimeRole.isRemoteUI { BackgroundRuntimeBridge.send("desktop.register", ["url": url, "screen": screen, "options": Dictionary(uniqueKeysWithValues: options.map { ($0.key.rawValue, $0.value) })]); return }
-        // 系统壁纸同步关闭时禁止注册，防止后续 Space 切换时绕开关闭状态重新写入系统壁纸。
-        guard VideoWallpaperManager.shared.isSystemWallpaperSyncEnabled else {
-            print("[DesktopWallpaperSyncManager] 🧊 系统壁纸同步已关闭，跳过注册")
-            return
+        if let sourceURL {
+            sourcePathByImagePath[url.standardizedFileURL.path] = sourceURL.standardizedFileURL.path
+            WaifuXPreferences.shared.set(sourcePathByImagePath, forKey: "desktop_wallpaper_static_sources_v1")
         }
-        if #available(macOS 26.0, *),
-           VideoWallpaperManager.shared.shouldPreserveLockScreenWallpaperSelection {
-            print("[DesktopWallpaperSyncManager] 🔒 动态锁屏已启用，跳过静态桌面壁纸注册")
-            return
-        }
-
+        guard isVerifiedStaticImage(url) else { return }
         let targetScreens: [NSScreen]
         if let screen = screen {
             targetScreens = [screen]
@@ -216,6 +258,10 @@ final class DesktopWallpaperSyncManager {
     }
 
     /// 返回指定屏幕最后通过 App 设置的静态壁纸 URL（无记录时返回 nil）
+    func originalSourceURL(for imageURL: URL) -> URL {
+        sourcePathByImagePath[imageURL.standardizedFileURL.path].map { URL(fileURLWithPath: $0) } ?? imageURL
+    }
+
     func imageURL(for screen: NSScreen) -> URL? {
         let screenID = screen.wallpaperScreenIdentifier
         let fingerprint = screen.wallpaperScreenFingerprint
@@ -257,6 +303,7 @@ final class DesktopWallpaperSyncManager {
 
     /// 应用变为活跃时的备用同步入口（处理 activeSpaceDidChangeNotification 丢失的情况）
     func syncOnAppActivation() {
+        guard BackgroundRuntimeRole.allowsDesktopRendering else { return }
         if BackgroundRuntimeRole.isRemoteUI { BackgroundRuntimeBridge.send("desktop.activation"); return }
         let screenCount = NSScreen.screens.count
         if screenCount <= 1, !requiresActivationRecoverySync {
@@ -402,12 +449,7 @@ final class DesktopWallpaperSyncManager {
             in: lastSetImageURLByFingerprint,
             forFingerprint: fingerprint
         ) else { return false }
-        let path = url.path
-        // 跳过 wallpaper-wgpu / wallpaperengine-cli 运行时 capture 路径，应用重启后不存在
-        if path.contains("wallpaper-wgpu-capture") || path.contains("wallpaperengine-cli-capture") {
-            return false
-        }
-        return FileManager.default.fileExists(atPath: path)
+        return isVerifiedStaticImage(url) && FileManager.default.fileExists(atPath: url.path)
     }
 
     private func persistFingerprintState() {
@@ -433,43 +475,6 @@ final class DesktopWallpaperSyncManager {
             lastSetImageURLByFingerprint[fingerprint] = URL(string: urlString)
         }
         migrateLegacyFingerprintStateIfNeeded()
-    }
-
-    /// 旧版会把 scene 实时渲染窗口截图注册为系统壁纸。该来源已经移除，必须同时
-    /// 清掉持久化注册，避免切换 Space 或唤醒时把历史截图重新写回桌面/锁屏。
-    private func purgeLegacyRendererCaptureState() {
-        let legacyDirectory = URL(fileURLWithPath: NSHomeDirectory())
-            .appendingPathComponent("Library/Caches/com.waifux.wallpaperengine/captured-frames", isDirectory: true)
-            .standardizedFileURL
-        let legacyPrefix = legacyDirectory.path.hasSuffix("/")
-            ? legacyDirectory.path
-            : legacyDirectory.path + "/"
-
-        let legacyFingerprints = lastSetImageURLByFingerprint.compactMap { fingerprint, url in
-            url.standardizedFileURL.path.hasPrefix(legacyPrefix) ? fingerprint : nil
-        }
-        for fingerprint in legacyFingerprints {
-            lastSetImageURLByFingerprint.removeValue(forKey: fingerprint)
-            lastOptionsByFingerprint.removeValue(forKey: fingerprint)
-        }
-
-        let legacyScreenIDs = lastSetImageURLByScreen.compactMap { screenID, url in
-            url.standardizedFileURL.path.hasPrefix(legacyPrefix) ? screenID : nil
-        }
-        for screenID in legacyScreenIDs {
-            lastSetImageURLByScreen.removeValue(forKey: screenID)
-            lastOptionsByScreen.removeValue(forKey: screenID)
-        }
-
-        for key in WaifuXPreferences.shared.dictionaryRepresentation().keys where key.hasPrefix("cached_frame_") {
-            WaifuXPreferences.shared.removeObject(forKey: key)
-        }
-        try? FileManager.default.removeItem(at: legacyDirectory)
-
-        if !legacyFingerprints.isEmpty || !legacyScreenIDs.isEmpty {
-            persistFingerprintState()
-            print("[DesktopWallpaperSyncManager] 已清除旧 scene 窗口截图壁纸注册")
-        }
     }
 
     /// 旧版无序列号指纹无法可靠地区分同型号显示器。升级时从 macOS 当前每屏
@@ -507,152 +512,41 @@ final class DesktopWallpaperSyncManager {
     }
 
     /// 执行实际同步逻辑
+    private func isVerifiedStaticImage(_ url: URL) -> Bool {
+        guard url.isFileURL else { return false }
+        let path = sourcePathByImagePath[url.standardizedFileURL.path] ?? url.standardizedFileURL.path
+        guard let record = WallpaperLibraryService.shared.downloadRecord(forLocalFilePath: path) else { return false }
+        return WallhavenContentPolicy.isWallpaperRecord(id: record.wallpaper.id, detailURL: record.wallpaper.url, imagePath: record.wallpaper.path)
+    }
+
     private func performSync(source: String) {
-        let start = Date()
+        guard BackgroundRuntimeRole.allowsDesktopRendering, !BackgroundRuntimeRole.isIsolatedTest else { return }
         pendingThrottledSyncWorkItem?.cancel()
         pendingThrottledSyncWorkItem = nil
-        // 保留写入频率限制，但不能直接丢弃最后一次 Space/唤醒/显示器同步。
-        // 补跑只捕获触发来源；执行时重新读取每屏最新静图或 video/scene/web poster。
-        if let last = lastSyncTime {
-            let remainingInterval = minimumSyncInterval - start.timeIntervalSince(last)
-            if remainingInterval > 0 {
-                let workItem = DispatchWorkItem { [weak self] in
-                    self?.performSync(source: source)
-                }
-                pendingThrottledSyncWorkItem = workItem
-                DispatchQueue.main.asyncAfter(deadline: .now() + remainingInterval, execute: workItem)
-                print("[DesktopWallpaperSyncManager] Deferring sync from '\(source)' (throttled)")
+        if let lastSyncTime {
+            let remaining = minimumSyncInterval - Date().timeIntervalSince(lastSyncTime)
+            if remaining > 0 {
+                let item = DispatchWorkItem { [weak self] in self?.performSync(source: source) }
+                pendingThrottledSyncWorkItem = item
+                DispatchQueue.main.asyncAfter(deadline: .now() + remaining, execute: item)
                 return
             }
         }
-        lastSyncTime = start
-
-        let videoManager = VideoWallpaperManager.shared
-        let hasStaticRegistrations = !lastSetImageURLByScreen.isEmpty || !lastSetImageURLByFingerprint.isEmpty
-        let hasDynamicWallpaper = videoManager.isVideoWallpaperActive
-        guard hasStaticRegistrations || hasDynamicWallpaper else {
-            AppLogger.debug(.ui, "Desktop wallpaper sync skipped", metadata: [
-                "source": source,
-                "reason": "noRegisteredWallpaperState"
-            ])
-            return
-        }
-
-        let workspace = NSWorkspace.shared
-        let currentScreens = NSScreen.screens
+        lastSyncTime = Date()
         relinkScreenStateForCurrentDisplays()
-        let shouldSkipStaticDesktopWrites: Bool = {
-            if #available(macOS 26.0, *) {
-                return videoManager.shouldPreserveLockScreenWallpaperSelection
-            }
-            return false
-        }()
-        var syncWrites = 0
-
-        // 1. 对每个当前屏幕，优先同步该屏幕自己的壁纸状态
-        for screen in currentScreens {
-            let screenID = screen.wallpaperScreenIdentifier
+        for screen in NSScreen.screens {
+            let id = screen.wallpaperScreenIdentifier
             let fingerprint = screen.wallpaperScreenFingerprint
-
-            // 系统壁纸同步关闭时跳过本屏的同步，避免后续 Space 切换回写系统壁纸。
-            guard videoManager.isSystemWallpaperSyncEnabled else {
-                print("[DesktopWallpaperSyncManager] [\(source)] 🧊 系统壁纸同步已关闭，跳过同步 for screen \(screen.localizedName)")
-                continue
-            }
-
-            // 如果该屏幕属于视频壁纸目标，同步其 poster（不再跳过，确保所有 Spaces 都正确）
-            if videoManager.hasActiveWallpaper(on: screen),
-               let posterURL = videoManager.posterURL(for: screen),
-               videoManager.isVideoWallpaperActive {
-                // ⚠️ 动态锁屏启用时跳过 poster 同步，避免触发 setDesktopImageURL 导致系统重置扩展选择
-                if shouldSkipStaticDesktopWrites {
-                    print("[DesktopWallpaperSyncManager] [\(source)] 🔒 动态锁屏已启用，跳过 poster 同步 for screen \(screen.localizedName)")
-                } else {
-                    do {
-                        let writeStart = Date()
-                        // 使用 "充满屏幕" 缩放模式，与初始设置保持一致
-                        let fillOptions: [NSWorkspace.DesktopImageOptionKey: Any] = [
-                            .imageScaling: NSNumber(value: NSImageScaling.scaleProportionallyUpOrDown.rawValue),
-                            .allowClipping: true
-                        ]
-                        try workspace.setDesktopImageURLForAllSpaces(posterURL, for: screen, options: fillOptions)
-                        syncWrites += 1
-                        let elapsedMS = Date().timeIntervalSince(writeStart) * 1000
-                        if elapsedMS >= 250 {
-                            AppLogger.warn(.ui, "Desktop wallpaper sync write was slow", metadata: [
-                                "source": source,
-                                "screen": screen.localizedName,
-                                "kind": "videoPoster",
-                                "durationMS": String(format: "%.0f", elapsedMS)
-                            ])
-                        }
-                        print("[DesktopWallpaperSyncManager] [\(source)] Synced video poster for screen \(screen.localizedName)")
-                    } catch {
-                        print("[DesktopWallpaperSyncManager] [\(source)] Failed to sync poster for screen \(screen.localizedName): \(error)")
-                    }
-                }
-                continue
-            }
-
-            // 否则同步该屏幕最后注册的静态壁纸
-            guard let url = lastSetImageURLByScreen[screenID]
-                    ?? WallpaperScreenIdentity.value(
-                        in: lastSetImageURLByFingerprint,
-                        forFingerprint: fingerprint
-                    ) else {
-                continue
-            }
-
-            // 跳过 wallpaper-wgpu 渲染的临时 capture 路径（应用重启后不存在）
-            if url.path.contains("wallpaper-wgpu-capture") || url.path.contains("wallpaperengine-cli-capture") {
-                print("[DesktopWallpaperSyncManager] [\(source)] Skipping wallpaper-wgpu capture path for screen \(screen.localizedName)")
-                continue
-            }
-
-            if shouldSkipStaticDesktopWrites {
-                print("[DesktopWallpaperSyncManager] [\(source)] 🔒 动态锁屏已启用，跳过静态壁纸同步 for screen \(screen.localizedName)")
-                continue
-            }
-
+            guard let url = lastSetImageURLByScreen[id]
+                ?? WallpaperScreenIdentity.value(in: lastSetImageURLByFingerprint, forFingerprint: fingerprint),
+                  isVerifiedStaticImage(url), FileManager.default.fileExists(atPath: url.path) else { continue }
+            let options = lastOptionsByScreen[id]
+                ?? WallpaperScreenIdentity.value(in: lastOptionsByFingerprint, forFingerprint: fingerprint) ?? [:]
             do {
-                let writeStart = Date()
-                // 使用 setDesktopImageURLForAllSpaces 确保所有 Spaces 同步，
-                // 该方法内部已发送 com.apple.desktop 通知，无需额外触发
-                let options = lastOptionsByScreen[screenID]
-                    ?? WallpaperScreenIdentity.value(
-                        in: lastOptionsByFingerprint,
-                        forFingerprint: fingerprint
-                    )
-                    ?? [:]
-                try workspace.setDesktopImageURLForAllSpaces(url, for: screen, options: options)
-                syncWrites += 1
-                let elapsedMS = Date().timeIntervalSince(writeStart) * 1000
-                if elapsedMS >= 250 {
-                    AppLogger.warn(.ui, "Desktop wallpaper sync write was slow", metadata: [
-                        "source": source,
-                        "screen": screen.localizedName,
-                        "kind": "staticWallpaper",
-                        "durationMS": String(format: "%.0f", elapsedMS)
-                    ])
-                }
-                print("[DesktopWallpaperSyncManager] [\(source)] Synced static wallpaper for screen \(screen.localizedName)")
+                try NSWorkspace.shared.setDesktopImageURLForAllSpaces(url, for: screen, options: options)
             } catch {
-                print("[DesktopWallpaperSyncManager] [\(source)] Failed to sync wallpaper for screen \(screen.localizedName): \(error)")
+                AppLogger.warn(.wallpaper, "Static desktop recovery failed", metadata: ["source": source, "screen": screen.localizedName, "error": error.localizedDescription])
             }
-        }
-
-        let totalMS = Date().timeIntervalSince(start) * 1000
-        let logMetadata: [String: Any] = [
-            "source": source,
-            "screens": currentScreens.count,
-            "writes": syncWrites,
-            "durationMS": String(format: "%.0f", totalMS),
-            "skipStaticWrites": shouldSkipStaticDesktopWrites
-        ]
-        if totalMS >= 500 {
-            AppLogger.warn(.ui, "Desktop wallpaper sync completed slowly", metadata: logMetadata)
-        } else {
-            AppLogger.debug(.ui, "Desktop wallpaper sync completed", metadata: logMetadata)
         }
     }
 }

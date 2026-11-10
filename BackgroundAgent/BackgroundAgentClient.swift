@@ -134,8 +134,6 @@ final class BackgroundAgentClient: ObservableObject {
     private var lastSpawnRejection: String?
     var onApplicationQuitRequested: (() -> Void)?
     var onHelperStopped: (() -> Void)?
-    private var pendingCropCommands: [String: [String: Any]] = [:]
-    private var cropFlushTask: Task<Void, Never>?
     #if DEBUG
     private var isolatedProbeService: String?
     private var pausedHelperProbePID: Int32?
@@ -173,6 +171,14 @@ final class BackgroundAgentClient: ObservableObject {
 
     func start() {
         guard bootstrapTask == nil, !isQuittingApplication else { return }
+        #if DEBUG
+        if BackgroundRuntimeRole.isIsolatedTest,
+           ProcessInfo.processInfo.environment["WAIFUX_UI_FULL_STARTUP"] == "1" {
+            do { try prepareIsolatedUIStartup() }
+            catch { lastError = error.localizedDescription }
+            return
+        }
+        #endif
         isClosing = false
         requiresApproval = false
         isBootstrapping = true
@@ -441,7 +447,6 @@ final class BackgroundAgentClient: ObservableObject {
         let legacy = UserDefaults.standard.persistentDomain(forName: "com.waifux.app") ?? [:]
         _ = try await perform("preferences.migrate", ["preferences": legacy])
         try Task.checkCancellation()
-        try await configureMediaEnvironment()
         _ = WaifuXPreferences.shared.takeBufferedMutations()
         try await replayPendingPreferences()
         _ = try await perform("bootstrap", [:])
@@ -455,12 +460,7 @@ final class BackgroundAgentClient: ObservableObject {
         installPreferenceMutationHandler()
     }
 
-    private func configureMediaEnvironment() async throws {
-        try Task.checkCancellation()
-        let environment = ProcessInfo.processInfo.environment
-        _ = try await perform("media.configure", ["developerToken": environment["WAIFUX_APPLE_MUSIC_DEVELOPER_TOKEN"] ?? "", "storefront": environment["WAIFUX_APPLE_MUSIC_STOREFRONT"] ?? ""])
-        try Task.checkCancellation()
-    }
+
 
     private func replayPendingPreferences(timeoutSeconds: Double? = nil) async throws {
         for mutation in try WaifuXPreferences.shared.pendingMutationData() {
@@ -496,20 +496,22 @@ final class BackgroundAgentClient: ObservableObject {
         let hello = try JSONDecoder().decode(BackgroundAgentHello.self, from: helloData)
         let data = try await exchange(using: diagnosticConnection) { proxy, gate in proxy.subscribe { gate.finish(.success($0 as Data)) } }
         let snapshot = try BackgroundPropertyList.decode(data)
-        let video = snapshot["video"] as? [String: Any] ?? [:]
         return ["serviceStatus": service.status.rawValue, "helperPID": hello.processIdentifier,
                 "helperBundleID": hello.bundleIdentifier, "ready": hello.runtimeReady,
                 "loadedCodeIdentity": hello.buildIdentity ?? "",
                 "embeddedCodeIdentity": BackgroundAgentBuildIdentity.executable(WaifuXHostBundle.bundleURL.appendingPathComponent("Contents/Helpers/WaifuXHelper.app/Contents/MacOS/WaifuXHelper")) ?? "",
                 "menuBar": snapshot["menuBar"] as? [String: Any] ?? [:],
-                "appearance": snapshot["appearance"] as? [String: Any] ?? [:],
-                "nativePlayerCount": video["nativePlayerCount"] as? Int ?? 0,
-                "nativeWindowCount": video["nativeWindowCount"] as? Int ?? 0]
+                "appearance": snapshot["appearance"] as? [String: Any] ?? [:]]
     }
 
     /// Exercises the real command queue, subscription and exit drain without
     /// registering a production login item or importing the user's preferences.
     func startIsolatedUIExitProbe() async throws {
+        try prepareIsolatedUIStartup()
+        try await bootstrapTask?.value
+    }
+
+    private func prepareIsolatedUIStartup() throws {
         let environment = ProcessInfo.processInfo.environment
         guard BackgroundRuntimeRole.isIsolatedTest,
               let service = environment["WAIFUX_HELPER_TEST_SERVICE"],
@@ -535,7 +537,6 @@ final class BackgroundAgentClient: ObservableObject {
             isConnected = true
             installPreferenceMutationHandler()
         }
-        try await bootstrapTask?.value
     }
 
     func pauseIsolatedHelperForExitProbe() async throws {
@@ -688,8 +689,7 @@ final class BackgroundAgentClient: ObservableObject {
                     #if DEBUG
                     try await regressionCheckpoint("reconnect.identified")
                     #endif
-                    try await configureMediaEnvironment()
-                    try await replayPendingPreferences()
+                                try await replayPendingPreferences()
                     _ = try await perform("bootstrap", [:])
                     try Task.checkCancellation()
                     try await subscribe()
@@ -855,18 +855,6 @@ final class BackgroundAgentClient: ObservableObject {
     }
 
     func send(_ operation: String, _ arguments: [String: Any] = [:]) {
-        if operation == "crop.update", arguments["interactive"] as? Bool == true, let id = arguments["id"] as? String {
-            pendingCropCommands[id] = arguments
-            if cropFlushTask == nil {
-                cropFlushTask = Task {
-                    try? await Task.sleep(for: .milliseconds(33))
-                    guard !Task.isCancelled else { return }
-                    flushCropCommands()
-                }
-            }
-            return
-        }
-        flushCropCommands()
         sendImmediately(operation, arguments)
     }
 
@@ -878,20 +866,13 @@ final class BackgroundAgentClient: ObservableObject {
         }
     }
 
-    private func flushCropCommands() {
-        cropFlushTask?.cancel()
-        cropFlushTask = nil
-        let commands = pendingCropCommands
-        pendingCropCommands.removeAll()
-        for id in commands.keys.sorted() { sendImmediately("crop.update", commands[id]!) }
-    }
+
 
     /// - Parameter interfaceOnly: 关窗口/换界面时 Helper 会继续运行，待存设置
     ///   已经持久化在 pending 队列里，连接恢复后自动回放；所以这里只需要一次
     ///   有界的尝试，不能被无响应的 Helper 拖到退出看门狗。完整退出仍要求
     ///   Helper 明确 ack 每一笔写入。
     func drainForUIExit(interfaceOnly: Bool = false) async throws {
-        flushCropCommands()
         if interfaceOnly {
             // 单一 2s 窗口同时覆盖 in-flight 命令与 pending 重放。分成两段
             // 2s 串行会和随后的 cloud sync（再 2s）一起撞上 6s 退出看门狗。
@@ -920,7 +901,7 @@ final class BackgroundAgentClient: ObservableObject {
             }
         }
         try Task.checkCancellation()
-        // Give unrelated in-flight commands (Steam, cloud, …) only a short grace
+        // Give unrelated in-flight commands (cloud sync and downloads) only a short grace
         // period: a slow command must not stall window-close into the 6s quit
         // watchdog. Preference durability is enforced by the replay below.
         if let tail = commandTail {
@@ -950,7 +931,7 @@ final class BackgroundAgentClient: ObservableObject {
         try Task.checkCancellation()
         guard try WaifuXPreferences.shared.pendingMutationData().isEmpty else {
             throw NSError(domain: "WaifuXHelper", code: 4,
-                userInfo: [NSLocalizedDescriptionKey: "仍有设置等待后台保存，请稍后重试"])
+                userInfo: [NSLocalizedDescriptionKey: t("仍有设置等待后台保存，请稍后重试")])
         }
     }
 
@@ -1003,7 +984,6 @@ final class BackgroundAgentClient: ObservableObject {
     /// quit must not reconnect or enqueue a bootstrap after the Helper stops.
     func beginApplicationQuit() {
         guard !isQuittingApplication else { return }
-        flushCropCommands()
         isQuittingApplication = true
         helperStopRequested = false
         isClosing = true
@@ -1156,15 +1136,13 @@ final class BackgroundAgentClient: ObservableObject {
         // A new Mach-service probe can relaunch a successfully stopped job.
         // Observe only the acknowledged process while waiting for its exit.
         //
-        // Helper 收到 runtime.stop 后还要收尾渲染器与子进程（动态壁纸渲染中
-        // 可达数秒，见 BackgroundAgentRuntime.stopAll）。3.5s 会把「正在正常
-        // 退出」误判成失败，并让第二次尝试落到 BTM 状态分支上。
+        // Allow the helper to finish its durable writers before checking process exit.
         for _ in 0..<100 {
             if helperProcessGone(pid) { return }
             try await Task.sleep(for: .milliseconds(100))
         }
         throw NSError(domain: "WaifuXHelper", code: 4,
-                      userInfo: [NSLocalizedDescriptionKey: "后台服务仍在退出，请重试退出 WaifuX"])
+                      userInfo: [NSLocalizedDescriptionKey: t("后台服务仍在退出，请重试退出 WaifuX")])
     }
 
     private func helperProcessGone(_ pid: Int32) -> Bool {
@@ -1190,7 +1168,7 @@ final class BackgroundAgentClient: ObservableObject {
             if helperProcessGone(pid) { return .alreadyStopped }
             if status != .enabled {
                 return .failure(NSError(domain: "WaifuXHelper", code: 4,
-                    userInfo: [NSLocalizedDescriptionKey: "后台服务仍在运行，但登录项不可用，请允许后台服务后重试退出"]))
+                    userInfo: [NSLocalizedDescriptionKey: t("后台服务仍在运行，但登录项不可用，请允许后台服务后重试退出")]))
             }
             return .failure(fallback)
         }
@@ -1240,11 +1218,10 @@ final class BackgroundAgentClient: ObservableObject {
         }
         // helperStopRequested 时保持 isClosing：Helper 正在不可逆地退出，
         // 自动重连只会把正在退出的后台服务重新拉起。
-        lastError = "退出未完成，WaifuX 界面已保留：\(error.localizedDescription)"
+        lastError = String(format: t("退出未完成，WaifuX 界面已保留：%@"), String(describing: error.localizedDescription))
     }
 
     func request(_ operation: String, _ arguments: [String: Any] = [:]) async throws -> [String: Any] {
-        flushCropCommands()
         return try BackgroundPropertyList.decode(await enqueue(operation, arguments).value)
     }
 
@@ -1313,7 +1290,7 @@ final class BackgroundAgentClient: ObservableObject {
                 let timer = Task { @MainActor in
                     try? await Task.sleep(for: .seconds(timeoutSeconds))
                     guard !Task.isCancelled else { return }
-                    gate.finish(.failure(NSError(domain: "WaifuXHelper", code: 3, userInfo: [NSLocalizedDescriptionKey: "后台服务响应超时"])))
+                    gate.finish(.failure(NSError(domain: "WaifuXHelper", code: 3, userInfo: [NSLocalizedDescriptionKey: t("后台服务响应超时")])))
                 }
                 gate.setTimeout(timer)
             }
@@ -1363,9 +1340,6 @@ final class BackgroundAgentClient: ObservableObject {
     func disconnect() {
         isClosing = true
         connectionGeneration &+= 1
-        cropFlushTask?.cancel()
-        cropFlushTask = nil
-        pendingCropCommands.removeAll()
         resetLibraryFetch()
         reconnectGeneration &+= 1
         reconnectTask?.cancel()

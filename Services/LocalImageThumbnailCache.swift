@@ -76,21 +76,20 @@ final class LocalImageThumbnailCache {
     /// 缓存文件名尺寸段：格式变更 = 旧产物整体失效重生成。
     private let sizeToken = "768"
 
-    /// 可生成静态列表 JPEG 的扩展（**不含 gif**：动图必须保留原文件给 hover 播放）。
+    /// Supported Wallhaven raster originals.
     nonisolated private static let rasterExtensions: Set<String> = [
-        "jpg", "jpeg", "png", "webp", "heic", "heif", "avif", "bmp", "tiff", "tif"
+        "jpg", "jpeg", "png", "webp"
     ]
 
     private init() {
-        let caches = fileManager.urls(for: .cachesDirectory, in: .userDomainMask)
-        cacheDirectory = caches[0].appendingPathComponent("WaifuX/LocalImageThumbnails", isDirectory: true)
+        cacheDirectory = WallpaperCachePaths.directory("WaifuX/LocalImageThumbnails")
         try? fileManager.createDirectory(at: cacheDirectory, withIntermediateDirectories: true)
         existenceCache.countLimit = 4000
     }
 
     // MARK: - Public
 
-    /// 是否适合走本缓存（本地**静图**文件；GIF 返回 false，避免压成 JPEG 后无法 hover 播放）。
+    /// Only supported local static originals may enter this thumbnail cache.
     nonisolated static func isRasterImageFile(_ url: URL) -> Bool {
         guard url.isFileURL else { return false }
         return rasterExtensions.contains(url.pathExtension.lowercased())

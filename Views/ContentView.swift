@@ -1,7 +1,6 @@
 import SwiftUI
 import AppKit
 import Kingfisher
-import AVFoundation
 
 /// macOS 15+ 的 Liquid Glass 改变了标题栏 safe area 行为，
 /// NSHostingController 会报告标题栏高度作为 top safe area，
@@ -31,13 +30,8 @@ private final class MainContentNavigationState: ObservableObject {
     @Published var isHomeChromeHidden = false
     @Published var isShowingDetail = false
     @Published var selectedWallpaper: Wallpaper?
-    @Published var selectedMedia: MediaItem?
-    @Published var selectedAnime: AnimeSearchResult?
-    @Published var librarySelectedAnime: AnimeSearchResult?
     @Published var librarySelectedWallpaper: Wallpaper?
-    @Published var librarySelectedMedia: MediaItem?
     @Published var libraryWallpaperContext: [Wallpaper] = []
-    @Published var libraryMediaContext: [MediaItem] = []
     /// Click-time visual context, consumed once by openDetail; never published per scroll frame.
     var pendingCardSource: CardTransitionSource?
     var pendingCardSourceTab: MainTab?
@@ -65,13 +59,8 @@ private final class MainContentNavigationState: ObservableObject {
         isShowingDetail = false
         mouseRevealOrigin = nil
         selectedWallpaper = nil
-        selectedMedia = nil
-        selectedAnime = nil
-        librarySelectedAnime = nil
         librarySelectedWallpaper = nil
-        librarySelectedMedia = nil
         libraryWallpaperContext.removeAll()
-        libraryMediaContext.removeAll()
         pendingCardSource = nil
         pendingCardSourceTab = nil
         selectedTab = .home
@@ -120,16 +109,12 @@ private final class MainContentNavigationState: ObservableObject {
 private struct MainTabContainerView: NSViewControllerRepresentable {
     @ObservedObject var navigationState: MainContentNavigationState
     @ObservedObject var wallpaperViewModel: WallpaperViewModel
-    @ObservedObject var mediaViewModel: MediaExploreViewModel
-    @ObservedObject var animeViewModel: AnimeViewModel
 
     func makeNSViewController(context: Context) -> MainTabViewController {
         let controller = MainTabViewController()
         controller.configure(
             navigationState: navigationState,
-            wallpaperViewModel: wallpaperViewModel,
-            mediaViewModel: mediaViewModel,
-            animeViewModel: animeViewModel
+            wallpaperViewModel: wallpaperViewModel
         )
         return controller
     }
@@ -141,16 +126,10 @@ private struct MainTabContainerView: NSViewControllerRepresentable {
 
 private enum MainDetailRoute: Hashable {
     case wallpaper(Wallpaper, context: [Wallpaper]?)
-    case media(MediaItem, context: [MediaItem]?)
-    case anime(AnimeSearchResult)
-    case manga(MangaRoutePayload)
 
     var transitionItemID: String? {
         switch self {
         case .wallpaper(let item, _): item.id
-        case .media(let item, _): item.id
-        case .anime(let item): item.id
-        case .manga: nil
         }
     }
 }
@@ -170,45 +149,30 @@ private final class MainTabViewController: NSTabViewController {
 
     func configure(
         navigationState: MainContentNavigationState,
-        wallpaperViewModel: WallpaperViewModel,
-        mediaViewModel: MediaExploreViewModel,
-        animeViewModel: AnimeViewModel
+        wallpaperViewModel: WallpaperViewModel
     ) {
         guard !isConfigured else {
             select(tab: navigationState.selectedTab)
             return
         }
 
-        // 按 MainTab.allCases 顺序（home → wallpaperExplore → animeExplore → mediaExplore → myMedia）
-        // 仅添加启动快照启用的 tab。home/myMedia 永远启用；三个 Explore 受 ModuleAvailability 门控。
-        for tab in MainTab.allCases where ModuleAvailability.shared.isTabEnabled(tab) {
+        // Build the three static wallpaper pages once and retain their navigation state.
+        for tab in MainTab.allCases {
             switch tab {
             case .home:
                 addPage(title: tab.title, view: HomeTabPage(
                     navigationState: navigationState,
-                    wallpaperViewModel: wallpaperViewModel,
-                    mediaViewModel: mediaViewModel
+                    wallpaperViewModel: wallpaperViewModel
                 ))
             case .wallpaperExplore:
                 addPage(title: tab.title, view: WallpaperExploreTabPage(
                     navigationState: navigationState,
                     wallpaperViewModel: wallpaperViewModel
                 ))
-            case .animeExplore:
-                addPage(title: tab.title, view: AnimeExploreTabPage(
-                    navigationState: navigationState,
-                    animeViewModel: animeViewModel
-                ))
-            case .mediaExplore:
-                addPage(title: tab.title, view: MediaExploreTabPage(
-                    navigationState: navigationState,
-                    mediaViewModel: mediaViewModel
-                ))
             case .myMedia:
                 addPage(title: tab.title, view: MyLibraryTabPage(
                     navigationState: navigationState,
-                    wallpaperViewModel: wallpaperViewModel,
-                    mediaViewModel: mediaViewModel
+                    wallpaperViewModel: wallpaperViewModel
                 ))
             }
             addedTabs.append(tab)
@@ -244,20 +208,15 @@ private final class MainTabViewController: NSTabViewController {
 private struct HomeTabPage: View {
     @ObservedObject var navigationState: MainContentNavigationState
     @ObservedObject var wallpaperViewModel: WallpaperViewModel
-    @ObservedObject var mediaViewModel: MediaExploreViewModel
 
     var body: some View {
         HomeContentView(
             viewModel: wallpaperViewModel,
-            mediaViewModel: mediaViewModel,
             selectedWallpaper: navigationState.binding(for: \.selectedWallpaper),
-            selectedMedia: navigationState.binding(for: \.selectedMedia),
             isHomeChromeHidden: navigationState.binding(for: \.isHomeChromeHidden),
             onOpenWallpapers: { navigationState.selectedTab = .wallpaperExplore },
-            onOpenMedia: { navigationState.selectedTab = .mediaExplore },
             isTabActive: navigationState.selectedTab == .home && !navigationState.isShowingDetail
         )
-        .environment(\.coverGIFPlaybackHostActive, navigationState.selectedTab == .home && !navigationState.isShowingDetail)
     }
 }
 
@@ -272,37 +231,6 @@ private struct WallpaperExploreTabPage: View {
             isVisible: navigationState.selectedTab == .wallpaperExplore && !navigationState.isShowingDetail,
             onPrepareCardTransition: { navigationState.prepareCardSource($0, from: .wallpaperExplore) }
         )
-        .environment(\.coverGIFPlaybackHostActive, navigationState.selectedTab == .wallpaperExplore && !navigationState.isShowingDetail)
-    }
-}
-
-private struct AnimeExploreTabPage: View {
-    @ObservedObject var navigationState: MainContentNavigationState
-    @ObservedObject var animeViewModel: AnimeViewModel
-
-    var body: some View {
-        AnimeExploreView(
-            viewModel: animeViewModel,
-            selectedAnime: navigationState.binding(for: \.selectedAnime),
-            isVisible: navigationState.selectedTab == .animeExplore && !navigationState.isShowingDetail,
-            onPrepareCardTransition: { navigationState.prepareCardSource($0, from: .animeExplore) }
-        )
-        .environment(\.coverGIFPlaybackHostActive, navigationState.selectedTab == .animeExplore && !navigationState.isShowingDetail)
-    }
-}
-
-private struct MediaExploreTabPage: View {
-    @ObservedObject var navigationState: MainContentNavigationState
-    @ObservedObject var mediaViewModel: MediaExploreViewModel
-
-    var body: some View {
-        MediaExploreContentView(
-            viewModel: mediaViewModel,
-            selectedMedia: navigationState.binding(for: \.selectedMedia),
-            isVisible: navigationState.selectedTab == .mediaExplore && !navigationState.isShowingDetail,
-            onPrepareCardTransition: { navigationState.prepareCardSource($0, from: .mediaExplore) }
-        )
-        .environment(\.coverGIFPlaybackHostActive, navigationState.selectedTab == .mediaExplore && !navigationState.isShowingDetail)
     }
 }
 
@@ -311,21 +239,15 @@ private struct MyLibraryTabPage: View {
     // 库页不订阅完整 ViewModel：探索页 isLoading/searchQuery 等不应刷库 body。
     // 列表刷新由 MyLibraryContentView 内 libraryContentRevision onReceive 驱动。
     let wallpaperViewModel: WallpaperViewModel
-    let mediaViewModel: MediaExploreViewModel
 
     var body: some View {
         MyLibraryContentView(
             viewModel: wallpaperViewModel,
-            mediaViewModel: mediaViewModel,
             selectedWallpaper: navigationState.binding(for: \.librarySelectedWallpaper),
-            selectedMedia: navigationState.binding(for: \.librarySelectedMedia),
-            selectedAnime: navigationState.binding(for: \.librarySelectedAnime),
             wallpaperContext: navigationState.binding(for: \.libraryWallpaperContext),
-            mediaContext: navigationState.binding(for: \.libraryMediaContext),
             isVisible: navigationState.selectedTab == .myMedia && !navigationState.isShowingDetail,
             onPrepareCardTransition: { navigationState.prepareCardSource($0, from: .myMedia) }
         )
-        .environment(\.coverGIFPlaybackHostActive, navigationState.selectedTab == .myMedia && !navigationState.isShowingDetail)
     }
 }
 
@@ -337,18 +259,12 @@ struct ContentView: View {
     // 而连锁触发整个 ContentView body 及下游 tab 子视图的反复重算。
     // 子视图（5 个 TabPage）继续以 @ObservedObject 接收这些 ViewModel —— 该响应链是必要的。
     let viewModel: WallpaperViewModel
-    let mediaViewModel: MediaExploreViewModel
-    let animeViewModel: AnimeViewModel
 
     @StateObject private var navigationState = MainContentNavigationState()
     @StateObject private var guessYouLikeVM = GuessYouLikeViewModel()
     @StateObject private var cardMorph = WallpaperCardMorphCoordinator()
     @State private var activeCardSourceTab: MainTab?
     @ObservedObject private var localization = LocalizationService.shared
-    // 注意：WallpaperSourceManager.shared 不在此顶层观察。
-    // 它有 2 个 @Published 属性（activeSource / lastSwitchMessage），若顶层 @ObservedObject 会在数据源切换时触发整个 ContentView body 重算。
-    // 数据源切换提示由独立子视图（WallpaperSourceSwitchToast）各自观察，并复用同一个 SourceSwitchToast 外观。
-    // 数据源已无任何自动切换逻辑（启动 ping/VPN 决策已删除），启动后可直接加载数据。
     @State private var detailPath: [MainDetailRoute] = []
     @State private var detailNavigation = PageNavigationMotion()
     /// 非动画重置也变更页面标识，以取消尚未结束的过渡，而不是再播放一次返回。
@@ -359,13 +275,9 @@ struct ContentView: View {
     @State private var detailBackSwipeRegistration: UUID?
 
     init(
-        wallpaperViewModel: WallpaperViewModel,
-        mediaViewModel: MediaExploreViewModel,
-        animeViewModel: AnimeViewModel
+        wallpaperViewModel: WallpaperViewModel
     ) {
         self.viewModel = wallpaperViewModel
-        self.mediaViewModel = mediaViewModel
-        self.animeViewModel = animeViewModel
     }
 
     var body: some View {
@@ -421,72 +333,22 @@ struct ContentView: View {
         }
         .onChange(of: navigationState.selectedWallpaper) { _, wallpaper in
             guard let wallpaper else { return }
-            if wallpaper.isPixivManga {
-                let route = MangaRoutePayload(
-                    source: .pixiv,
-                    illustId: String(wallpaper.id.dropFirst("pixiv_".count)),
-                    seedTitle: wallpaper.title,
-                    seedCoverURL: wallpaper.path
-                )
-                openDetail(.manga(route))
-            } else {
-                openDetail(.wallpaper(wallpaper, context: nil))
-            }
+            openDetail(.wallpaper(wallpaper, context: nil))
         }
-        .onChange(of: navigationState.selectedMedia) { _, item in
-            guard let item else { return }
-            openDetail(.media(item, context: nil))
-        }
-        .onChange(of: navigationState.selectedAnime) { _, anime in
-            guard let anime else { return }
-            openDetail(.anime(anime))
-        }
+
+
         .onChange(of: navigationState.librarySelectedWallpaper) { _, wallpaper in
             guard let wallpaper else { return }
-            if wallpaper.isPixivManga {
-                let route = MangaRoutePayload(
-                    source: .pixiv,
-                    illustId: String(wallpaper.id.dropFirst("pixiv_".count)),
-                    seedTitle: wallpaper.title,
-                    seedCoverURL: wallpaper.path
-                )
-                openDetail(.manga(route))
-            } else {
-                let context = navigationState.libraryWallpaperContext.isEmpty ? nil : navigationState.libraryWallpaperContext
-                openDetail(.wallpaper(wallpaper, context: context))
-            }
+            let context = navigationState.libraryWallpaperContext.isEmpty ? nil : navigationState.libraryWallpaperContext
+            openDetail(.wallpaper(wallpaper, context: context))
         }
-        .onChange(of: navigationState.librarySelectedMedia) { _, item in
-            guard let item else { return }
-            let context = navigationState.libraryMediaContext.isEmpty ? nil : navigationState.libraryMediaContext
-            openDetail(.media(item, context: context))
-        }
-        .onChange(of: navigationState.librarySelectedAnime) { _, anime in
-            guard let anime else { return }
-            openDetail(.anime(anime))
-        }
+
+
         .task {
-            // 数据源已无启动决策流程（ping Google / VPN 检测与 isInitialSourceSelectionComplete 门控已删除），
-            // 直接加载首页数据（各管线按功能模块开关门控）
-            try? await Task.sleep(nanoseconds: 300_000_000) // 0.3s
-            if ModuleAvailability.shared.wallpaperEnabled {
-                await viewModel.initialLoad()
-            }
-
-            if ModuleAvailability.shared.mediaEnabled {
-                Task(priority: .utility) {
-                    try? await Task.sleep(nanoseconds: 200_000_000)
-                    await mediaViewModel.initialLoadIfNeeded()
-                }
-            }
-
-            // 预加载猜你喜欢数据（后台静默加载，确保点击弹窗时数据已就绪）
-            // 猜你喜欢依赖壁纸数据，壁纸模块关闭时跳过
-            if ModuleAvailability.shared.wallpaperEnabled {
-                guessYouLikeVM.preload()
-            }
-
-            // Sparkle 自动按 SUScheduledCheckInterval (24h) 检查更新，无需手动触发
+            try? await Task.sleep(nanoseconds: 300_000_000)
+            guard !Task.isCancelled else { return }
+            await viewModel.initialLoad()
+            guessYouLikeVM.preload()
         }
         .ignoresSafeArea()
         .applyTheme()
@@ -547,14 +409,6 @@ struct ContentView: View {
                 BackgroundDownloadProgressToastHost(
                     onExpand: { DownloadTaskService.shared.restoreAllRunningToasts() }
                 )
-                VideoOptimizationProgressToastHost()
-                BakeProgressToastHost()
-                WallpaperSourceSwitchToast()
-                    .padding(.horizontal, 24)
-                    .padding(.bottom, 8)
-                WorkshopSourceSwitchToast()
-                    .padding(.horizontal, 24)
-                    .padding(.bottom, 20)
             }
             .zIndex(400)
 
@@ -596,9 +450,7 @@ struct ContentView: View {
 
             MainTabContainerView(
                 navigationState: navigationState,
-                wallpaperViewModel: viewModel,
-                mediaViewModel: mediaViewModel,
-                animeViewModel: animeViewModel
+                wallpaperViewModel: viewModel
             )
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .onReceive(NotificationCenter.default.publisher(for: .appShouldReleaseForegroundMemory)) { _ in
@@ -617,6 +469,7 @@ struct ContentView: View {
                 navigationState.selectedTab = .myMedia
             }
             .id(localization.currentLanguage)
+            .environment(\.locale, Locale(identifier: localization.currentLanguage.rawValue))
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .navigationBarBackButtonHidden(true)
@@ -655,23 +508,10 @@ struct ContentView: View {
 
     private func consumePendingWallpaperDetailRequest() {
         guard let request = MainNavigationRequestStore.consumeWallpaperDetailRequest() else { return }
-
         navigationState.selectedTab = .myMedia
         switch request {
-        case .media(let item):
-            replaceDetailWithCurrentWallpaper(.media(item, context: [item]))
         case .wallpaper(let wallpaper):
-            if wallpaper.isPixivManga {
-                let route = MangaRoutePayload(
-                    source: .pixiv,
-                    illustId: String(wallpaper.id.dropFirst("pixiv_".count)),
-                    seedTitle: wallpaper.title,
-                    seedCoverURL: wallpaper.path
-                )
-                replaceDetailWithCurrentWallpaper(.manga(route))
-            } else {
-                replaceDetailWithCurrentWallpaper(.wallpaper(wallpaper, context: [wallpaper]))
-            }
+            replaceDetailWithCurrentWallpaper(.wallpaper(wallpaper, context: [wallpaper]))
         }
     }
 
@@ -715,65 +555,10 @@ struct ContentView: View {
             .navigationBarBackButtonHidden(true)
             .toolbar(.hidden, for: .automatic)
 
-        case .media(let item, let context):
-            CardMorphMediaGate(itemID: item.id, coordinator: cardMorph) { isTransitioning, isClosing, isPreparingImage in
-                MediaDetailSheet(
-                    item: item,
-                    viewModel: mediaViewModel,
-                    contextItems: context,
-                    onClose: popDetail,
-                    onNavigateToItem: { selected in
-                        cardMorph.cancelAll()
-                        updateDetailPath(detailPath + [.media(selected, context: context)])
-                    },
-                    transitionImage: cardMorph.seedImage(for: item.id),
-                    onTransitionReady: { cardMorph.detailDidAppear(itemID: item.id) },
-                    onTransitionImageReady: { id, image in cardMorph.detailImageReady(itemID: id, image: image) },
-                    onDisplayedItemChange: { cardMorph.detailChangedItem(to: $0) },
-                    isCardTransitionActive: isTransitioning,
-                    isCardTransitionClosing: isClosing,
-                    isPreparingTransitionImage: isPreparingImage
-                )
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .navigationBarBackButtonHidden(true)
-            .toolbar(.hidden, for: .automatic)
-
-        case .anime(let anime):
-            AnimeDetailSheet(
-                anime: anime,
-                isPresented: Binding(
-                    get: { !detailPath.isEmpty },
-                    set: { if !$0 { popDetail() } }
-                ),
-                transitionImage: cardMorph.seedImage(for: anime.id),
-                onTransitionReady: { cardMorph.detailDidAppear(itemID: anime.id) },
-                onTransitionImageReady: { id, image in cardMorph.detailImageReady(itemID: id, image: image) },
-                onDisplayedItemChange: { cardMorph.detailChangedItem(to: $0) },
-                onTransitionLayoutChange: { usesBackdrop in
-                    cardMorph.detailLayoutChanged(itemID: anime.id, layout: usesBackdrop ? .fill : .portrait)
-                }
-            )
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .ignoresSafeArea()
-            .navigationBarBackButtonHidden(true)
-            .toolbar(.hidden, for: .automatic)
-
-        case .manga(let route):
-            MangaDetailSheet(
-                route: route,
-                onNavigateToManga: { selectedRoute in
-                    updateDetailPath(detailPath + [.manga(selectedRoute)])
-                }
-            )
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .ignoresSafeArea()
-                .navigationBarBackButtonHidden(true)
-                .toolbar(.hidden, for: .automatic)
         }
     }
 
-    /// Native dismiss() (漫画返回/系统返回) 也走同一入口，不能只给自绘返回按钮加动画。
+    /// Native dismiss and the custom back button share the same transition.
     private var detailPathBinding: Binding<[MainDetailRoute]> {
         Binding(
             get: { detailPath },
@@ -829,12 +614,6 @@ struct ContentView: View {
         clearTriggerBinding(for: route)
         if animated, detailPath.isEmpty, let source, source.itemID == route.transitionItemID,
            cardMorph.present(source, imageLayout: transitionImageLayout(for: route), prepareImage: { size, scale in
-               if case .media(let item, _) = route {
-                   let record = MediaLibraryService.shared.downloadRecord(for: item.id)
-                   let isBaking = SceneOfflineBakeProgressTracker.shared.progress(for: item.id) != nil
-                   return await WallpaperTransitionImageLoader.loadMedia(
-                       item: item, record: record, isBaking: isBaking, viewportSize: size, displayScale: scale)
-               }
                guard let url = self.transitionImageURL(for: route) else { return nil }
                return await WallpaperTransitionImageLoader.load(url: url, viewportSize: size, displayScale: scale)
            }, open: { self.updateDetailPath([route], animated: false) }) {
@@ -847,9 +626,6 @@ struct ContentView: View {
         switch route {
         case .wallpaper(let wallpaper, _):
             viewModel.localFileURLIfAvailable(for: wallpaper) ?? wallpaper.fullImageURL ?? wallpaper.thumbURL
-        case .media(let item, _): item.coverImageURL
-        case .anime(let anime): anime.coverURL.flatMap(URL.init(string:))
-        case .manga: nil
         }
     }
 
@@ -857,23 +633,12 @@ struct ContentView: View {
         switch route {
         case .wallpaper(let wallpaper, _):
             wallpaper.dimensionY > wallpaper.dimensionX && wallpaper.dimensionX > 0 ? .portrait : .fill
-        case .anime: .portrait
-        case .media, .manga: .fill
         }
     }
 
     private func clearTriggerBinding(for route: MainDetailRoute) {
-        // 仅清除触发当前导航的那个 binding，避免 5 个无关的 onChange 空跑
-        switch route {
-        case .wallpaper:
-            navigationState.selectedWallpaper = nil
-        case .media:
-            navigationState.selectedMedia = nil
-        case .anime:
-            navigationState.selectedAnime = nil
-        case .manga:
-            break // 漫画入口不走 navigationState，无需清理
-        }
+        navigationState.selectedWallpaper = nil
+        navigationState.librarySelectedWallpaper = nil
     }
 
     private func requestDetailPath(_ newPath: [MainDetailRoute]) {
@@ -897,7 +662,7 @@ struct ContentView: View {
         requestDetailPath(Array(detailPath.dropLast()))
     }
 
-    /// Wallpaper, media, anime, and manga detail pages share this NavigationStack.
+    /// The wallpaper detail stack shares the native back gesture.
     private func registerDetailBackSwipeHandler() {
         guard detailBackSwipeRegistration == nil else { return }
         detailBackSwipeRegistration = TrackpadBackSwipeRouter.shared.register(
@@ -944,113 +709,23 @@ struct ContentView: View {
         )
     }
 
-    /// 将 GuessYouLikeItem 映射到 MediaItem（用于详情）
-    private func resolveMediaItem(from item: GuessYouLikeItem) -> MediaItem {
-        // Wallpaper Engine 需要 workshop_ 前缀，否则详情页无法识别为 Workshop 物品
-        let isWorkshop = item.sourceName == "Wallpaper Engine"
-        let slug = isWorkshop ? "workshop_\(item.id)" : item.id
-        let sourceName = isWorkshop ? t("wallpaperEngine") : item.sourceName
-
-        return MediaItem(
-            slug: slug,
-            title: item.title,
-            pageURL: URL(string: item.destination)
-                ?? URL(string: "https://example.com")!,
-            thumbnailURL: URL(string: item.imageURL)
-                ?? URL(string: "https://example.com")!,
-            resolutionLabel: item.subtitle,
-            collectionTitle: item.sourceName,
-            summary: nil,
-            previewVideoURL: item.previewVideoURL.flatMap { URL(string: $0) },
-            posterURL: URL(string: item.imageURL),
-            tags: [],
-            exactResolution: nil,
-            durationSeconds: nil,
-            downloadOptions: item.downloadOptions,
-            sourceName: sourceName,
-            isAnimatedImage: nil
-        )
-    }
-
     private func handleGuessYouLikeDetail(_ item: GuessYouLikeItem) {
         guessYouLikeVM.dismiss()
-        switch item.contentType {
-        case .wallpaper:
-            let wp = resolveWallpaper(from: item)
-            // 通过 NavigationStack 打开详情
-            navigationState.selectedWallpaper = wp
-        case .video, .anime:
-            let media = resolveMediaItem(from: item)
-            navigationState.selectedMedia = media
-        }
+        navigationState.selectedWallpaper = resolveWallpaper(from: item)
     }
 
     private func handleGuessYouLikeDownload(_ item: GuessYouLikeItem) {
         guessYouLikeVM.dismiss()
-        switch item.contentType {
-        case .wallpaper:
-            let wp = resolveWallpaper(from: item)
-            Task {
-                do {
-                    try await viewModel.downloadWallpaper(wp)
-                } catch {
-                    AppLogger.error(.download, "猜你喜欢下载壁纸失败",
-                        metadata: ["id": wp.id, "error": error.localizedDescription])
-                }
-            }
-        case .video, .anime:
-            let media = resolveMediaItem(from: item)
-            Task {
-                do {
-                    // Wallpaper Engine 走专用下载路径
-                    if item.sourceName == "Wallpaper Engine" {
-                        let workshopItem = MediaItem(
-                            slug: "workshop_\(item.id)",
-                            title: item.title,
-                            pageURL: URL(string: item.destination)
-                                ?? URL(string: "https://example.com")!,
-                            thumbnailURL: URL(string: item.imageURL)
-                                ?? URL(string: "https://example.com")!,
-                            resolutionLabel: item.subtitle,
-                            collectionTitle: item.sourceName,
-                            sourceName: item.sourceName
-                        )
-                        try await mediaViewModel.downloadWorkshopWallpaper(workshopItem)
-                        return
-                    }
-
-                    // 1. 加载详情获取 downloadOptions（与详情页 downloadMedia 逻辑一致）
-                    let resolved = try await mediaViewModel.loadDetail(for: media)
-                    // 2. 自动选择最高画质（与详情页一致）
-                    guard let best = resolved.downloadOptions.max(by: {
-                        if $0.qualityRank == $1.qualityRank {
-                            return $0.fileSizeMegabytes < $1.fileSizeMegabytes
-                        }
-                        return $0.qualityRank < $1.qualityRank
-                    }) else {
-                        throw NetworkError.invalidResponse
-                    }
-                    // 3. 走标准下载流程，自动触发 DownloadProgressToastHost
-                    _ = try await mediaViewModel.downloadMedia(resolved, option: best)
-                } catch {
-                    AppLogger.error(.download, "猜你喜欢下载媒体失败",
-                        metadata: ["id": media.id, "error": error.localizedDescription])
-                    // 自动下载失败时 fallback 到详情页，让用户手动下载
-                    await MainActor.run {
-                        navigationState.selectedMedia = media
-                    }
-                }
-            }
+        let wallpaper = resolveWallpaper(from: item)
+        Task {
+            do { try await viewModel.downloadWallpaper(wallpaper) }
+            catch { viewModel.errorMessage = error.localizedDescription }
         }
     }
 
     private func clearSelectedDetailBindings() {
         navigationState.selectedWallpaper = nil
-        navigationState.selectedMedia = nil
-        navigationState.selectedAnime = nil
         navigationState.librarySelectedWallpaper = nil
-        navigationState.librarySelectedMedia = nil
-        navigationState.librarySelectedAnime = nil
     }
 
     private func zoomWindow() {
@@ -1074,8 +749,6 @@ struct ContentView: View {
         navigationState.pendingCardSourceTab = nil
         ForegroundPrefetchManager.shared.stopAll()
         viewModel.releaseForegroundMemory()
-        mediaViewModel.releaseForegroundMemory()
-        animeViewModel.releaseForegroundMemory()
         updateDetailPath([], animated: false)
         navigationState.resetForMemoryRelease()
     }
@@ -1099,28 +772,12 @@ struct ContentView: View {
     }
 
     private func handleDownloadToastRetry(_ snapshot: DownloadToastSnapshot) {
-        DownloadTaskService.shared.clearToastSuppression(for: snapshot.id)
-
-        guard let task = DownloadTaskService.shared.task(for: snapshot.id) else { return }
-
+        let service = DownloadTaskService.shared
+        service.clearToastSuppression(for: snapshot.id)
+        guard let task = service.task(for: snapshot.id) else { return }
         Task {
-            do {
-                switch task.kind {
-                case .wallpaper:
-                    try await viewModel.retryDownload(task: task)
-                case .media, .workshop:
-                    try await mediaViewModel.retryDownload(task: task)
-                }
-            } catch {
-                await MainActor.run {
-                    switch task.kind {
-                    case .wallpaper:
-                        viewModel.errorMessage = error.localizedDescription
-                    case .media, .workshop:
-                        mediaViewModel.errorMessage = error.localizedDescription
-                    }
-                }
-            }
+            do { try await viewModel.retryDownload(task: task) }
+            catch { viewModel.errorMessage = error.localizedDescription }
         }
     }
 }
@@ -1208,7 +865,6 @@ private struct DownloadProgressToastHost: View {
                 DownloadProgressToast(
                     snapshot: snapshot,
                     activeTaskCount: viewModel.activeTaskCount,
-                    workshopQueuedCount: viewModel.workshopQueuedCount,
                     suppressProgressAnimation: scrollTracker.isScrolling,
                     onDismiss: {
                         dismiss(snapshot)
@@ -1423,71 +1079,6 @@ private struct BackgroundDownloadProgressToastHost: View {
     }
 }
 
-/// Reads the unified optimization queue without owning or changing any task.
-/// The same compact layer is visible in the library and on detail pages.
-private struct VideoOptimizationProgressToastHost: View {
-    @ObservedObject private var queue = VideoOptimizationQueueService.shared
-
-    private var activeItem: FrameInterpolationQueueItem? {
-        queue.activeProcessingItem
-    }
-
-    var body: some View {
-        Group {
-            if let item = activeItem {
-                BackgroundTaskProgressToast(
-                    title: title(for: item),
-                    detail: remainingDetail(queue.remainingWorkCount),
-                    progress: item.progress
-                )
-            }
-        }
-        .transition(.opacity.combined(with: .move(edge: .bottom)))
-    }
-
-    private func title(for item: FrameInterpolationQueueItem) -> String {
-        let progress = Int((item.progress * 100).rounded())
-        switch item.currentOperation {
-        case .loopTransition:
-            return String(format: t("loopAnalysis.toastRunning"), progress)
-        case .frameInterpolation:
-            return String(format: t("frameInterpolationToastRunning"), progress)
-        case nil:
-            return t("videoOptimizationOptimizingVideo")
-        }
-    }
-
-    private func remainingDetail(_ count: Int) -> String? {
-        count > 0 ? String(format: t("progress.remainingCount"), count) : nil
-    }
-}
-
-/// Compact bake progress for scene offline bake and standalone BakeService work.
-private struct BakeProgressToastHost: View {
-    @ObservedObject private var taskQueue = TaskQueueStatusService.shared
-
-    private var bakeEntries: [TaskQueueStatusService.Entry] {
-        taskQueue.entries.filter { $0.category == .bake }
-    }
-
-    var body: some View {
-        Group {
-            if let entry = bakeEntries.first {
-                BackgroundTaskProgressToast(
-                    title: String(format: t("bake.backgroundProgress"), Int((entry.progress * 100).rounded())),
-                    detail: remainingDetail(bakeEntries.count - 1),
-                    progress: entry.progress
-                )
-                .transition(.opacity.combined(with: .move(edge: .bottom)))
-            }
-        }
-    }
-
-    private func remainingDetail(_ count: Int) -> String? {
-        count > 0 ? String(format: t("progress.remainingCount"), count) : nil
-    }
-}
-
 private struct BackgroundTaskProgressToast: View {
     let title: String
     let detail: String?
@@ -1538,7 +1129,6 @@ private struct BackgroundTaskProgressToast: View {
 private struct DownloadProgressToast: View {
     let snapshot: DownloadToastSnapshot
     let activeTaskCount: Int
-    let workshopQueuedCount: Int
     /// 列表滚动期间为 true：进度直接跳变，不启动新动画（避免与滚动渲染抢主线程）
     var suppressProgressAnimation: Bool = false
     let onDismiss: () -> Void
@@ -1554,8 +1144,6 @@ private struct DownloadProgressToast: View {
             return Color.white.opacity(0.7)
         case .downloading:
             return Color.white.opacity(0.85)
-        case .waitingForSteamLogin:
-            return Color.orange.opacity(0.9)
         case .paused:
             return Color.white.opacity(0.6)
         case .completed:
@@ -1571,10 +1159,6 @@ private struct DownloadProgressToast: View {
         switch snapshot.kind {
         case .wallpaper:
             return "photo.fill"
-        case .media:
-            return "play.rectangle.fill"
-        case .workshop:
-            return "gearshape.fill"
         }
     }
 
@@ -1582,7 +1166,6 @@ private struct DownloadProgressToast: View {
         switch snapshot.status {
         case .pending:   return t("status.pending")
         case .downloading: return t("status.downloading")
-        case .waitingForSteamLogin: return t("status.waitingForSteamLogin")
         case .paused:     return t("status.paused")
         case .completed:   return t("status.completed")
         case .failed:      return t("status.failed")
@@ -1599,10 +1182,6 @@ private struct DownloadProgressToast: View {
             if !snapshot.subtitle.isEmpty { parts.append(snapshot.subtitle) }
             if !snapshot.badgeText.isEmpty { parts.append(snapshot.badgeText) }
         }
-        // Workshop 下载排队提示
-        if workshopQueuedCount > 0 {
-            parts.append(String(format: t("status.queued"), workshopQueuedCount))
-        }
         return parts.isEmpty ? "" : parts.joined(separator: " · ")
     }
 
@@ -1613,7 +1192,6 @@ private struct DownloadProgressToast: View {
     private var showsCancel: Bool {
         snapshot.status == .pending
             || snapshot.status == .downloading
-            || snapshot.status == .waitingForSteamLogin
     }
 
     /// 进度条动画：临界阻尼 spring，约 0.3s 收敛。
@@ -1670,7 +1248,7 @@ private struct DownloadProgressToast: View {
                             .fill(Color.white.opacity(0.10))
                     )
 
-                // 右上角快捷操作：下载中=取消本次下载（含排队/等待 Steam 登录），
+                // 右上角快捷操作：下载中=取消本次下载（含排队），
                 // 其余状态（完成/失败/暂停/已取消）=关闭弹窗
                 Button(action: snapshot.isRunning ? onCancel : onDismiss) {
                     Image(systemName: "xmark")
@@ -1681,7 +1259,7 @@ private struct DownloadProgressToast: View {
                         .contentShape(Circle())
                 }
                 .buttonStyle(.plain)
-                .help(snapshot.isRunning ? "取消下载" : "关闭")
+                .help(snapshot.isRunning ? t("取消下载") : t("captcha.close"))
             }
 
             // 进度区域
@@ -1695,7 +1273,7 @@ private struct DownloadProgressToast: View {
                 )
 
                 HStack {
-                    Text(snapshot.kind == .wallpaper ? t("wallpaper.downloads") : t("media.downloads"))
+                    Text(t("wallpaper.downloads"))
                         .font(.system(size: 11, weight: .semibold))
                         .foregroundStyle(.white.opacity(0.5))
 
@@ -1723,7 +1301,7 @@ private struct DownloadProgressToast: View {
             if showsCancel || showsRetry {
                 HStack(spacing: 10) {
                     toastActionButton(
-                        title: showsCancel ? "后台继续" : "关闭",
+                        title: showsCancel ? t("后台继续") : t("captcha.close"),
                         icon: showsCancel ? "arrow.down.circle" : "xmark",
                         role: .secondary,
                         action: onDismiss
@@ -1731,7 +1309,7 @@ private struct DownloadProgressToast: View {
 
                     if showsCancel {
                         toastActionButton(
-                            title: "取消下载",
+                            title: t("取消下载"),
                             icon: "xmark.circle.fill",
                             role: .destructive,
                             action: onCancel
@@ -1740,14 +1318,14 @@ private struct DownloadProgressToast: View {
                         // 失败/已取消/暂停态：除了重试，还要能直接取消并移除任务，
                         // 否则永远下载不了的资源只能反复「重新下载」或干等弹窗超时。
                         toastActionButton(
-                            title: "取消任务",
+                            title: t("取消任务"),
                             icon: "xmark.circle.fill",
                             role: .destructive,
                             action: onRemove
                         )
 
                         toastActionButton(
-                            title: "重新下载",
+                            title: t("library.redownload.item"),
                             icon: "arrow.clockwise",
                             role: .retry,
                             action: onRetry
@@ -1840,98 +1418,5 @@ private struct DownloadProgressToast: View {
             )
         }
         .buttonStyle(.plain)
-    }
-}
-
-// MARK: - 壁纸数据源切换 Toast
-private struct WallpaperSourceSwitchToast: View {
-    @ObservedObject private var sourceManager = WallpaperSourceManager.shared
-
-    var body: some View {
-        SourceSwitchToast(
-            message: $sourceManager.lastSwitchMessage,
-            dismissAfter: 3.5
-        )
-        .padding(.bottom, 40)
-    }
-}
-
-// MARK: - Wallpaper Engine 数据源切换 Toast
-private struct WorkshopSourceSwitchToast: View {
-    @ObservedObject private var sourceManager = WorkshopSourceManager.shared
-
-    var body: some View {
-        SourceSwitchToast(
-            message: $sourceManager.lastSwitchMessage,
-            dismissAfter: 3.0
-        )
-    }
-}
-
-/// 统一承载各数据源的切换提示；宿主仅传入各自的消息绑定和展示时长。
-private struct SourceSwitchToast: View {
-    @Binding var message: String?
-    let dismissAfter: TimeInterval
-
-    @State private var isShowing: Bool = false
-    @State private var hideWorkItem: DispatchWorkItem?
-
-    var body: some View {
-        VStack {
-            if let message, isShowing {
-                HStack(spacing: 10) {
-                    Image(systemName: "arrow.triangle.2.circlepath")
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundStyle(Color.white.opacity(0.85))
-                    Text(message)
-                        .font(.system(size: 13, weight: .medium))
-                        .foregroundStyle(Color.white.opacity(0.85))
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                }
-                .padding(.horizontal, 20)
-                .padding(.vertical, 12)
-                .liquidGlassSurface(
-                    .prominent,
-                    tint: Color.white.opacity(0.06),
-                    in: Capsule(style: .continuous)
-                )
-                .overlay(
-                    Capsule(style: .continuous)
-                        .stroke(Color.white.opacity(0.16), lineWidth: 0.5)
-                )
-                .shadow(color: .black.opacity(0.18), radius: 18, y: 8)
-                .frame(maxWidth: 360)
-            }
-        }
-        .opacity(isShowing ? 1 : 0)
-        .offset(y: isShowing ? 0 : 20)
-        .transition(.opacity.combined(with: .move(edge: .bottom)))
-        .onChange(of: message) { _, newMessage in
-            show(message: newMessage)
-        }
-        .onAppear {
-            show(message: message)
-        }
-    }
-
-    private func show(message: String?) {
-        guard let message else { return }
-
-        hideWorkItem?.cancel()
-        isShowing = true
-
-        let messageBinding = $message
-        let workItem = DispatchWorkItem {
-            withAnimation(.easeOut(duration: 0.25)) {
-                isShowing = false
-            }
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
-                guard messageBinding.wrappedValue == message else { return }
-                messageBinding.wrappedValue = nil
-            }
-        }
-        self.hideWorkItem = workItem
-        DispatchQueue.main.asyncAfter(deadline: .now() + dismissAfter, execute: workItem)
     }
 }

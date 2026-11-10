@@ -8,7 +8,6 @@ final class DownloadPathManager {
     static let shared = DownloadPathManager()
 
     /// 与设置中的开关一致：是否写入应用内媒体库
-    static let persistDownloadsToAppLibraryDefaultsKey = "save_to_downloads"
     /// 用户自定义下载根目录路径（ bookmarks 数据，用于跨启动保持访问权限）
     static let customDownloadRootBookmarkKey = "custom_download_root_bookmark_v1"
     /// 用户自定义下载根目录的纯路径字符串（仅用于展示）
@@ -118,16 +117,6 @@ final class DownloadPathManager {
     }
 
     /// 媒体目录
-    var mediaFolderURL: URL {
-        rootFolderURL.appendingPathComponent("Media", isDirectory: true)
-    }
-
-    /// Scene 离线烘焙 MP4 目录
-    var sceneBakesFolderURL: URL {
-        rootFolderURL.appendingPathComponent("SceneBakes", isDirectory: true)
-    }
-
-    /// 静态壁纸派生文件目录（例如竖图模糊填充），不参与本地壁纸扫描。
     var derivedWallpapersFolderURL: URL {
         rootFolderURL.appendingPathComponent("DerivedWallpapers", isDirectory: true)
     }
@@ -228,8 +217,8 @@ final class DownloadPathManager {
         panel.canChooseFiles = false
         panel.canChooseDirectories = true
         panel.allowsMultipleSelection = false
-        panel.prompt = "选择目录"
-        panel.message = "选择 WaifuX 下载文件的存储位置"
+        panel.prompt = LocalizationService.shared.t("选择目录")
+        panel.message = t("选择 WaifuX 下载文件的存储位置")
 
         guard panel.runModal() == .OK, let selectedURL = panel.url else {
             return nil
@@ -296,8 +285,6 @@ final class DownloadPathManager {
         let directories = [
             root,
             wallpapersFolderURL,
-            mediaFolderURL,
-            sceneBakesFolderURL,
             derivedWallpapersFolderURL
         ]
         var ok = true
@@ -322,12 +309,6 @@ final class DownloadPathManager {
             }
         }
 
-        // Optimization records no longer live next to media; lift any historical
-        // adjacent sidecars out of Media / SceneBakes when the library root is ready.
-        let migrated = VideoOptimizationRecordStore.shared.migrateLegacyAdjacentSidecarsInLibraryRootsIfNeeded()
-        if migrated > 0 {
-            print("[DownloadPathManager] Migrated \(migrated) video optimization sidecars out of media folders")
-        }
         return ok
     }
 
@@ -339,15 +320,12 @@ final class DownloadPathManager {
 
     enum ContentType {
         case wallpaper
-        case media
     }
 
     func destinationFolder(for type: ContentType) -> URL {
         switch type {
         case .wallpaper:
             return wallpapersFolderURL
-        case .media:
-            return mediaFolderURL
         }
     }
 
@@ -356,14 +334,7 @@ final class DownloadPathManager {
         return wallpapersFolderURL.appendingPathComponent(fileName)
     }
 
-    func mediaFileURL(slug: String, label: String, fileExtension: String) -> URL {
-        let safeSlug = slug
-            .replacingOccurrences(of: #"[^a-zA-Z0-9\-]+"#, with: "-", options: .regularExpression)
-            .trimmingCharacters(in: CharacterSet(charactersIn: "-"))
-        let safeLabel = label.lowercased().replacingOccurrences(of: " ", with: "-")
-        let fileName = "motionbgs-\(safeSlug)-\(safeLabel).\(fileExtension)"
-        return mediaFolderURL.appendingPathComponent(fileName)
-    }
+
 
     // MARK: - 路径检测
 
@@ -373,7 +344,6 @@ final class DownloadPathManager {
 
         enum LocationType {
             case wallpapersFolder
-            case mediaFolder
             case legacyRootFolder
             case notFound
         }
@@ -388,18 +358,7 @@ final class DownloadPathManager {
         return FileLocation(url: location, foundIn: .notFound)
     }
 
-    func locateMediaFile(slug: String, label: String, fileExtension: String) -> FileLocation {
-        let safeSlug = slug
-            .replacingOccurrences(of: #"[^a-zA-Z0-9\-]+"#, with: "-", options: .regularExpression)
-            .trimmingCharacters(in: CharacterSet(charactersIn: "-"))
-        let safeLabel = label.lowercased().replacingOccurrences(of: " ", with: "-")
-        let fileName = "motionbgs-\(safeSlug)-\(safeLabel).\(fileExtension)"
-        let location = mediaFolderURL.appendingPathComponent(fileName)
-        if fileManager.fileExists(atPath: location.path) {
-            return FileLocation(url: location, foundIn: .mediaFolder)
-        }
-        return FileLocation(url: location, foundIn: .notFound)
-    }
+
 
     func locateFile(named fileName: String) -> FileLocation {
         let wallpaperLocation = wallpapersFolderURL.appendingPathComponent(fileName)
@@ -407,10 +366,8 @@ final class DownloadPathManager {
             return FileLocation(url: wallpaperLocation, foundIn: .wallpapersFolder)
         }
 
-        let mediaLocation = mediaFolderURL.appendingPathComponent(fileName)
-        if fileManager.fileExists(atPath: mediaLocation.path) {
-            return FileLocation(url: mediaLocation, foundIn: .mediaFolder)
-        }
+        let legacy = rootFolderURL.appendingPathComponent(fileName)
+        if fileManager.fileExists(atPath: legacy.path) { return FileLocation(url: legacy, foundIn: .legacyRootFolder) }
 
         let defaultURL = inferDefaultLocation(for: fileName)
         return FileLocation(url: defaultURL, foundIn: .notFound)
@@ -419,8 +376,6 @@ final class DownloadPathManager {
     private func inferDefaultLocation(for fileName: String) -> URL {
         if fileName.hasPrefix("wallhaven-") {
             return wallpapersFolderURL.appendingPathComponent(fileName)
-        } else if fileName.hasPrefix("motionbgs-") {
-            return mediaFolderURL.appendingPathComponent(fileName)
         } else {
             return rootFolderURL.appendingPathComponent(fileName)
         }
@@ -451,7 +406,6 @@ extension Notification.Name {
 
 enum MainWallpaperDetailRequest {
     case wallpaper(Wallpaper)
-    case media(MediaItem)
 }
 
 enum MainNavigationRequestStore {
@@ -462,7 +416,6 @@ enum MainNavigationRequestStore {
 
     private enum WallpaperDetailKind: String {
         case wallpaper
-        case media
     }
 
     static func requestLibraryTab() {
@@ -487,11 +440,10 @@ enum MainNavigationRequestStore {
         let payload: Data?
         switch request {
         case .wallpaper(let wallpaper):
+            guard WallhavenContentPolicy.isWallpaperRecord(id: wallpaper.id, detailURL: wallpaper.url, imagePath: wallpaper.path) else { return }
             kind = .wallpaper
             payload = try? JSONEncoder().encode(wallpaper)
-        case .media(let media):
-            kind = .media
-            payload = try? JSONEncoder().encode(media)
+
         }
 
         guard let payload else { return }
@@ -510,13 +462,12 @@ enum MainNavigationRequestStore {
 
         switch kind {
         case .wallpaper:
-            return (try? JSONDecoder().decode(Wallpaper.self, from: payload))
-                .map(MainWallpaperDetailRequest.wallpaper)
-        case .media:
-            return (try? JSONDecoder().decode(MediaItem.self, from: payload))
-                .map(MainWallpaperDetailRequest.media)
+            guard let image = try? JSONDecoder().decode(Wallpaper.self, from: payload),
+                  WallhavenContentPolicy.isWallpaperRecord(id: image.id, detailURL: image.url, imagePath: image.path) else { return nil }
+            return .wallpaper(image)
         }
     }
+
 
     static func clearWallpaperDetailRequest() {
         WaifuXPreferences.shared.removeObject(forKey: pendingWallpaperDetailKindKey)

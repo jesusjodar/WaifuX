@@ -2,6 +2,8 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+	<key>WaifuXBuildConfiguration</key>
+	<string>$(CONFIGURATION)</string>
 	<key>CFBundleName</key>
 	<string>WaifuX</string>
 	<key>CFBundleDisplayName</key>
@@ -26,7 +28,9 @@
 			<key>CFBundleURLName</key>
 			<string>com.waifux.app.ui</string>
 			<key>CFBundleURLSchemes</key>
-			<array><string>waifux</string></array>
+			<array>
+				<string>waifux</string>
+			</array>
 			<key>CFBundleTypeRole</key>
 			<string>Viewer</string>
 		</dict>
@@ -44,21 +48,16 @@
 		<string>zh</string>
 		<string>en</string>
 		<string>ja</string>
+		<string>es</string>
 	</array>
 	<key>CFBundleDevelopmentRegion</key>
 	<string>zh</string>
 	<key>LSUIElement</key>
 	<false/>
-	<key>NSScreenCaptureDescription</key>
-	<string>WaifuX 需要屏幕录制与系统音频捕获权限，用于动态壁纸显示、音频可视化和视频烘焙导出。</string>
-	<key>NSAppleMusicUsageDescription</key>
-	<string>WaifuX 需要读取「正在播放」信息，以便 Web 音频可视化壁纸显示歌名、艺人与封面。</string>
-	<key>NSAppleEventsUsageDescription</key>
-	<string>WaifuX 在系统媒体接口不可用时，通过 Apple Events 读取 Music 的正在播放信息，供壁纸 Media Integration 使用。</string>
 	<key>SUFeedURL</key>
-	<string>https://jipika.github.io/WaifuX/appcast.xml</string>
+	<string>https://jesusjodar.github.io/WaifuX/appcast.xml</string>
 	<key>SUEnableAutomaticChecks</key>
-	<true/>
+	<false/>
 	<key>SUScheduledCheckInterval</key>
 	<integer>86400</integer>
 	<key>NSAppTransportSecurity</key>
@@ -66,7 +65,5 @@
 		<key>NSAllowsLocalNetworking</key>
 		<true/>
 	</dict>
-	<key>NSAudioCaptureUsageDescription</key>
-	<string>WaifuX 需要捕获系统输出音频，为动态壁纸与桌面挂件提供实时音频可视化。</string>
 </dict>
 </plist>

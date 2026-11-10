@@ -52,10 +52,6 @@ final class GuessYouLikeViewModel: ObservableObject {
                 print("[GYL] Service returned empty, retrying with fresh fetch")
                 recommendations = await GuessYouLikeService.shared.forceRefresh()
             }
-            if recommendations.isEmpty {
-                print("[GYL] Still empty after retry, using mock data")
-                recommendations = GuessYouLikeItem.mockItems()
-            }
             guard !Task.isCancelled else { return }
             items = recommendations
             try? await Task.sleep(nanoseconds: 200_000_000)

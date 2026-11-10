@@ -3,7 +3,6 @@ import Kingfisher
 
 private enum HomePrefetchNamespace {
     static let wallpaperShelf = "home-wallpaper-shelf"
-    static let mediaShelf = "home-media-shelf"
 }
 
 // MARK: - CarouselTimerManager（管理轮播定时器的引用类型）
@@ -31,29 +30,21 @@ final class CarouselTimerManager: ObservableObject {
     }
 }
 
-// MARK: - HeroItem 联合类型（静态壁纸 / 动态 MotionBG）
+// MARK: - HeroItem 联合类型（Wallhaven 静态壁纸）
 fileprivate enum HeroItem: Identifiable {
     case wallpaper(Wallpaper)
-    case media(MediaItem)
 
     var id: String {
         switch self {
         case .wallpaper(let w): return "w-\(w.id)"
-        case .media(let m):     return "m-\(m.id)"
         }
     }
 
-    var previewVideoURL: URL? {
-        switch self {
-        case .wallpaper: return nil
-        case .media(let m): return m.previewVideoURL
-        }
-    }
+
 
     var imageURL: URL? {
         switch self {
         case .wallpaper(let w): return w.fullImageURL ?? w.thumbURL
-        case .media(let m):     return m.coverImageURL
         }
     }
 
@@ -64,8 +55,6 @@ fileprivate enum HeroItem: Identifiable {
                 return primary
             }
             return "Wallhaven \(w.id)"
-        case .media(let m):
-            return m.title
         }
     }
 
@@ -73,8 +62,6 @@ fileprivate enum HeroItem: Identifiable {
         switch self {
         case .wallpaper(let w):
             return w.resolution
-        case .media(let m):
-            return m.resolutionLabel
         }
     }
 
@@ -87,8 +74,6 @@ fileprivate enum HeroItem: Identifiable {
             case "people": return t("filter.people")
             default: return w.category.capitalized
             }
-        case .media(let m):
-            return m.sourceName
         }
     }
 
@@ -96,15 +81,12 @@ fileprivate enum HeroItem: Identifiable {
         switch self {
         case .wallpaper(let w):
             return w.tags?.first(where: { !$0.name.isEmpty })?.name
-        case .media(let m):
-            return m.tags.first ?? m.collectionTitle
         }
     }
 
     var thumbnailURL: URL? {
         switch self {
         case .wallpaper(let w): return w.thumbURL ?? w.smallThumbURL
-        case .media(let m): return m.coverImageURL
         }
     }
 }
@@ -117,12 +99,9 @@ fileprivate struct HeroCarouselSlide: Identifiable {
 
 struct HomeContentView: View {
     @ObservedObject var viewModel: WallpaperViewModel
-    @ObservedObject var mediaViewModel: MediaExploreViewModel
     @Binding var selectedWallpaper: Wallpaper?
-    @Binding var selectedMedia: MediaItem?
     @Binding var isHomeChromeHidden: Bool
     let onOpenWallpapers: () -> Void
-    let onOpenMedia: () -> Void
     /// 为 false 时不挂载重 UI（非当前 Tab），避免五 Tab 同时跑 ScrollView/轮播
     var isTabActive: Bool = true
     @ObservedObject private var arcSettings = ArcBackgroundSettings.shared
@@ -137,7 +116,6 @@ struct HomeContentView: View {
     @State private var isCarouselAnimating = false
     @State private var carouselDragOffset: CGFloat = 0
     @State private var scrollOffset: CGFloat = 0
-    @State private var initialLoadTask: Task<Void, Never>?
     @State private var wallhavenDefaultFilterRevision = 0
 
     // 骨架屏超时与重试：数据源（如 wallhaven）不可达时避免 shimmer 永挂空转烧 CPU
@@ -151,8 +129,6 @@ struct HomeContentView: View {
     // 首页背景氛围控制器
     @StateObject private var atmosphereController = HomeAtmosphereController()
 
-    // 轮播专用 MotionBG 数据（独立于 explore 列表）
-    @State private var heroMediaItems: [MediaItem] = []
 
     // 更高更沉浸的轮播图，接近参考图比例
     private func heroHeight(for width: CGFloat) -> CGFloat {
@@ -288,19 +264,7 @@ struct HomeContentView: View {
                 startCarouselAutoPlay()
             }
 
-            initialLoadTask?.cancel()
-            initialLoadTask = Task {
-                try? await Task.sleep(nanoseconds: 500_000_000)
-                guard !Task.isCancelled else { return }
-                // 媒体模块关闭时，不加载媒体管线与首页媒体数据
-                guard ModuleAvailability.shared.mediaEnabled else { return }
-                await mediaViewModel.initialLoadIfNeeded()
-                guard !Task.isCancelled else { return }
-                await mediaViewModel.refreshHomeItems()
-                guard !Task.isCancelled else { return }
-                // 独立获取 MotionBG 轮播数据（固定源，不跟随 explore 列表变化）
-                await refreshHeroMediaItems()
-            }
+
             startHomeSkeletonDeadlineMonitor()
             startHomeRetryLoop()
         }
@@ -310,19 +274,15 @@ struct HomeContentView: View {
             cancelCarouselLoopReset()
             cancelCarouselInteractionReset()
             atmosphereController.pause()
-            initialLoadTask?.cancel()
-            initialLoadTask = nil
             homeSkeletonDeadlineTask?.cancel()
             homeSkeletonDeadlineTask = nil
             homeRetryTask?.cancel()
             homeRetryTask = nil
             homeSkeletonTimedOut = false
             ForegroundPrefetchManager.shared.stop(namespace: HomePrefetchNamespace.wallpaperShelf)
-            ForegroundPrefetchManager.shared.stop(namespace: HomePrefetchNamespace.mediaShelf)
         }
         .onReceive(NotificationCenter.default.publisher(for: .wallpaperDataSourceChanged)) { _ in
             // 壁纸模块关闭时不响应数据源变更，避免触发 viewModel.refresh() 全量加载
-            guard ModuleAvailability.shared.wallpaperEnabled else { return }
             Task { @MainActor in
                 await viewModel.refresh()
             }
@@ -341,10 +301,7 @@ struct HomeContentView: View {
                 cancelCarouselLoopReset()
                 cancelCarouselInteractionReset()
                 atmosphereController.pause()
-                initialLoadTask?.cancel()
-                initialLoadTask = nil
                 ForegroundPrefetchManager.shared.stop(namespace: HomePrefetchNamespace.wallpaperShelf)
-                ForegroundPrefetchManager.shared.stop(namespace: HomePrefetchNamespace.mediaShelf)
             }
         }
         .onChange(of: windowVisibility.allowContinuousAnimation) { _, _ in
@@ -381,9 +338,7 @@ struct HomeContentView: View {
             try? await Task.sleep(nanoseconds: 6_000_000_000)
             guard !Task.isCancelled else { return }
             homeSkeletonTimedOut = true
-            if heroItems.isEmpty ||
-                (ModuleAvailability.shared.wallpaperEnabled && recentWallpapers.isEmpty) ||
-                (ModuleAvailability.shared.mediaEnabled && mediaViewModel.homeItems.isEmpty) {
+            if heroItems.isEmpty || recentWallpapers.isEmpty {
                 AppLogger.error(.general, "[AnimTracker] home skeleton timeout: 数据 6s 未到达，骨架切静态占位")
             }
         }
@@ -396,7 +351,7 @@ struct HomeContentView: View {
             while !Task.isCancelled {
                 try? await Task.sleep(nanoseconds: 300_000_000_000)
                 guard !Task.isCancelled else { return }
-                guard heroItems.isEmpty, viewModel.wallpapers.isEmpty, heroMediaItems.isEmpty else { return }
+                guard heroItems.isEmpty, viewModel.wallpapers.isEmpty else { return }
                 AppLogger.error(.general, "[AnimTracker] home retry: 数据仍为空，触发 refresh")
                 await viewModel.refresh()
             }
@@ -407,10 +362,7 @@ struct HomeContentView: View {
         startHomeSkeletonDeadlineMonitor()
         Task { @MainActor in
             await viewModel.refresh()
-            if ModuleAvailability.shared.mediaEnabled {
-                await mediaViewModel.refreshHomeItems()
-                await refreshHeroMediaItems()
-            }
+
         }
     }
 
@@ -418,7 +370,6 @@ struct HomeContentView: View {
         guard let item = currentHeroItem else { return false }
         switch item {
         case .wallpaper(let w): return viewModel.isFavorite(w)
-        case .media: return false
         }
     }
 
@@ -426,7 +377,6 @@ struct HomeContentView: View {
         guard let item = currentHeroItem else { return }
         switch item {
         case .wallpaper(let w): selectedWallpaper = w
-        case .media(let m): selectedMedia = m
         }
     }
 
@@ -434,7 +384,6 @@ struct HomeContentView: View {
         guard let item = currentHeroItem else { return }
         switch item {
         case .wallpaper(let w): viewModel.toggleFavorite(w)
-        case .media: break
         }
     }
 
@@ -522,7 +471,7 @@ struct HomeContentView: View {
     private var contentSections: some View {
         VStack(alignment: .leading, spacing: 38) {
             // 最新静态壁纸（仅当壁纸模块启用时显示）
-            if ModuleAvailability.shared.wallpaperEnabled {
+            Group {
                 HomeShelfSection(
                     title: t("latestWallpaper"),
                     wallpapers: recentWallpapers,
@@ -537,21 +486,9 @@ struct HomeContentView: View {
                 )
             }
 
-            // 热门动态壁纸（使用独立的首页数据，不跟随 Explore 列表变化）
+            // 热门图片（使用独立的首页数据，不跟随 Explore 列表变化）
             // 仅当媒体模块启用时显示
-            if ModuleAvailability.shared.mediaEnabled {
-                HomeMediaSection(
-                    title: t("hotDynamic"),
-                    mediaItems: mediaViewModel.homeItems,
-                    atmospherePrimary: atmosphereController.primary,
-                    atmosphereSecondary: atmosphereController.secondary,
-                    onSelect: { item in
-                        selectedMedia = item
-                    },
-                    onSeeAll: onOpenMedia,
-                    skeletonTimedOut: homeSkeletonTimedOut
-                )
-            }
+
         }
         .padding(.top, 18)
     }
@@ -571,20 +508,9 @@ struct HomeContentView: View {
     }
 
     private var heroItems: [HeroItem] {
-        // 关闭对应模块时，该模块不进 Hero 轮播（空数组自然不进合并循环，不出现空块）
-        let wallpapers = ModuleAvailability.shared.wallpaperEnabled
-            ? viewModel.applyingWallhavenHomeDisplayFilters(to: viewModel.featuredWallpapers)
-                .filter { $0.dimensionX > $0.dimensionY }
-            : []
-        let mediaItems = ModuleAvailability.shared.mediaEnabled ? heroMediaItems : []
-
-        var result: [HeroItem] = []
-        let maxCount = max(wallpapers.count, mediaItems.count)
-        for i in 0..<min(maxCount, 8) {
-            if i < wallpapers.count { result.append(.wallpaper(wallpapers[i])) }
-            if i < mediaItems.count  { result.append(.media(mediaItems[i])) }
-        }
-        return result
+        viewModel.applyingWallhavenHomeDisplayFilters(to: viewModel.featuredWallpapers)
+            .filter { $0.dimensionX > $0.dimensionY }
+            .prefix(8).map { .wallpaper($0) }
     }
 
     private var heroItemIDs: [String] {
@@ -653,38 +579,7 @@ struct HomeContentView: View {
         )
     }
 
-    /// 独立刷新轮播专用的 MotionBG 数据（固定源，与 explore 列表解耦）
-    /// 列表页不包含 previewVideoURL，需要对前几个 item 请求详情页补充
-    private func refreshHeroMediaItems() async {
-        do {
-            let page = try await MediaService.shared.fetchPage(source: .home)
-            let listItems = Array(page.items.prefix(4))
 
-            // 并行请求详情页获取 previewVideoURL（单个失败不影响其他）
-            let detailedItems = await withTaskGroup(of: MediaItem?.self) { group in
-                for item in listItems {
-                    group.addTask {
-                        try? await MediaService.shared.fetchDetail(slug: item.slug)
-                    }
-                }
-                var results: [MediaItem] = []
-                for await item in group {
-                    if let item = item {
-                        results.append(item)
-                    }
-                }
-                return results
-            }
-
-            await MainActor.run {
-                heroMediaItems = detailedItems
-            }
-        } catch is CancellationError {
-            return
-        } catch {
-            AppLogger.error(.general, "Failed to fetch hero media items: \(error.localizedDescription)")
-        }
-    }
 
     private func syncCarouselState(with items: [HeroItem]) {
         cancelCarouselLoopReset()
@@ -962,7 +857,6 @@ private struct HeroSlide: View {
     private var palette: HeroDrivenPalette {
         switch item {
         case .wallpaper(let w): return HeroDrivenPalette(wallpaper: w)
-        case .media: return HeroDrivenPalette(wallpaper: nil)
         }
     }
 
@@ -993,14 +887,7 @@ private struct HeroSlide: View {
                     .clipped()
             }
 
-            if isCurrent, let videoURL = item.previewVideoURL {
-                LoopingVideoBackgroundView(
-                    url: videoURL,
-                    isMuted: true,
-                    onReady: nil
-                )
-                .frame(width: width, height: height)
-            }
+
         }
         .onChange(of: imageURL) { _ in imageLoadFailed = false }
     }
@@ -1098,7 +985,7 @@ private struct HeroCaptionPanel: View {
             HStack(spacing: 12) {
                 HeroActionButton(
                     title: t("viewWallpaper"),
-                    systemImage: "play.fill",
+                    systemImage: "photo",
                     prominence: .primary,
                     action: onOpen
                 )
@@ -1128,8 +1015,6 @@ private struct HeroCaptionPanel: View {
                 return beautifyTitle(secondary)
             }
             return "Wallhaven \(w.id)"
-        case .media(let m):
-            return m.title
         }
     }
 
@@ -1140,8 +1025,6 @@ private struct HeroCaptionPanel: View {
                 return beautifyTitle(tag).uppercased()
             }
             return categoryDisplayName.uppercased()
-        case .media(let m):
-            return (m.tags.first ?? m.sourceName).uppercased()
         }
     }
 
@@ -1154,19 +1037,12 @@ private struct HeroCaptionPanel: View {
                 fileSizeText(for: w),
                 fileTypeText(for: w)
             ].filter { !$0.isEmpty }
-        case .media(let m):
-            return [
-                m.resolutionLabel,
-                m.sourceName,
-                m.durationLabel ?? ""
-            ].filter { !$0.isEmpty }
         }
     }
 
     private var heroFavoriteCount: String {
         switch heroItem {
         case .wallpaper(let w): return "\(w.favorites)"
-        case .media: return "0"
         }
     }
 
@@ -1183,8 +1059,6 @@ private struct HeroCaptionPanel: View {
             default:
                 return w.category.capitalized
             }
-        case .media(let m):
-            return m.sourceName
         }
     }
 
@@ -1641,70 +1515,8 @@ private struct HomeShelfDeckBackground: View {
     }
 }
 
-// MARK: - 首页媒体区域（动态壁纸）
-private struct HomeMediaSection: View {
-    let title: String
-    let mediaItems: [MediaItem]
-    let atmospherePrimary: Color
-    let atmosphereSecondary: Color
-    let onSelect: (MediaItem) -> Void
-    let onSeeAll: () -> Void
-    var skeletonTimedOut: Bool = false
-    @State private var isSeeAllHovered = false
+// MARK: - 首页图片区域
 
-    var body: some View {
-        VStack(alignment: .leading, spacing: 18) {
-            HStack(spacing: 10) {
-                Text(title)
-                    .font(.system(size: 18, weight: .bold))
-                    .foregroundStyle(.white)
-
-                HomeSectionSeeAllButton(
-                    isHovered: $isSeeAllHovered,
-                    action: onSeeAll
-                )
-
-                Spacer()
-            }
-
-            if mediaItems.isEmpty {
-                if !skeletonTimedOut {
-                    HorizontalScrollSkeleton(
-                        primaryColor: atmospherePrimary.opacity(0.12),
-                        secondaryColor: atmosphereSecondary.opacity(0.08)
-                    )
-                    .frame(height: 158)
-                } else {
-                    HomeShelfEmptyFallback()
-                        .frame(height: 158)
-                }
-            } else {
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 18) {
-                        ForEach(mediaItems) { item in
-                            HomeMediaCard(
-                                item: item,
-                                onTap: { onSelect(item) }
-                            )
-                            .onAppear {
-                                guard let index = mediaItems.firstIndex(where: { $0.id == item.id }) else { return }
-                                let urls = (index + 1..<(index + 4))
-                                    .filter { $0 < mediaItems.count }
-                                    .map { mediaItems[$0].coverImageURL }
-                                ForegroundPrefetchManager.shared.start(
-                                    urls: urls,
-                                    namespace: HomePrefetchNamespace.mediaShelf
-                                )
-                            }
-                        }
-                    }
-                    .padding(.vertical, 2)
-                }
-                .frame(height: 158)
-            }
-        }
-    }
-}
 
 /// Stable hit target for the small trailing button used by home shelves.
 /// The hit shape lives inside the Button label so it remains reliable in a ScrollView.
@@ -1739,89 +1551,7 @@ private struct HomeSectionSeeAllButton: View {
     }
 }
 
-private struct HomeMediaCard: View {
-    let item: MediaItem
-    let onTap: () -> Void
 
-    @State private var isHovered = false
-
-    private let cardSize = CGSize(width: 278, height: 158)
-
-    var body: some View {
-        Button(action: onTap) {
-            ZStack {
-                // 背景图（底层色块 + 失败占位由 KFMediaCoverImage 统一处理）
-                KFMediaCoverImage(
-                    url: item.coverImageURL,
-                    animated: item.shouldRenderThumbnailAsAnimatedImage,
-                    downsampleSize: CGSize(width: cardSize.width * 2, height: cardSize.height * 2),
-                    fadeDuration: 0.3,
-                    loadFinished: nil,
-                    layoutSize: cardSize,
-                    playAnimatedImage: true,
-                    isVisible: true,
-                    animateOnHoverOnly: true,
-                    isHovered: isHovered
-                )
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-
-                // 渐变遮罩
-                LinearGradient(
-                    colors: [
-                        Color.clear,
-                        Color.black.opacity(0.1),
-                        Color.black.opacity(0.4)
-                    ],
-                    startPoint: .center,
-                    endPoint: .bottom
-                )
-
-                // 顶部标签
-                VStack {
-                    HStack {
-                        Text(t("aspect.dynamic"))
-                            .font(.system(size: 11, weight: .bold, design: .monospaced))
-                            .foregroundStyle(.white.opacity(0.9))
-                            .padding(.horizontal, 10)
-                            .frame(height: 24)
-                            .background(
-                                Capsule(style: .continuous)
-                                    .fill(Color(hex: "20C1FF").opacity(0.7))
-                            )
-
-                        Spacer()
-
-                        Text(item.resolutionLabel)
-                            .font(.system(size: 11, weight: .bold, design: .monospaced))
-                            .foregroundStyle(.white.opacity(0.9))
-                            .padding(.horizontal, 10)
-                            .frame(height: 24)
-                            .background(
-                                Capsule(style: .continuous)
-                                    .fill(Color.black.opacity(0.4))
-                            )
-                    }
-                    .padding(12)
-
-                    Spacer()
-                }
-            }
-            .frame(width: cardSize.width, height: cardSize.height)
-            .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-            .overlay(
-                RoundedRectangle(cornerRadius: 18, style: .continuous)
-                    .stroke(Color.white.opacity(isHovered ? 0.22 : 0.1), lineWidth: 1)
-            )
-            .scaleEffect(isHovered ? 1.015 : 1.0)
-        }
-        .buttonStyle(.plain)
-        .onHover { hovering in
-            withAnimation(.spring(response: 0.28, dampingFraction: 0.82)) {
-                isHovered = hovering
-            }
-        }
-    }
-}
 
 // MARK: - 首页轮播背景氛围控制器
 
@@ -1862,8 +1592,6 @@ final class HomeAtmosphereController: ObservableObject {
         switch item {
         case .wallpaper(let w):
             url = w.thumbURL ?? w.smallThumbURL
-        case .media(let m):
-            url = m.coverImageURL
         }
         guard let url = url else { return }
 
@@ -1940,11 +1668,11 @@ private struct HomeLoadFailedFallback: View {
                 Image(systemName: "wifi.exclamationmark")
                     .font(.system(size: 30, weight: .light))
                     .foregroundStyle(.white.opacity(0.5))
-                Text("首页内容加载失败，请检查网络")
+                Text(t("首页内容加载失败，请检查网络"))
                     .font(.system(size: 14, weight: .medium))
                     .foregroundStyle(.white.opacity(0.6))
                 Button(action: onRetry) {
-                    Text("重试")
+                    Text(t("ruleMarket.retry"))
                         .font(.system(size: 12, weight: .semibold))
                         .foregroundStyle(.white)
                         .padding(.horizontal, 20)
@@ -1964,7 +1692,7 @@ private struct HomeShelfEmptyFallback: View {
         ZStack {
             RoundedRectangle(cornerRadius: 18, style: .continuous)
                 .fill(Color.white.opacity(0.05))
-            Text("暂无内容")
+            Text(t("error.empty.title"))
                 .font(.system(size: 13, weight: .medium))
                 .foregroundStyle(.white.opacity(0.45))
         }

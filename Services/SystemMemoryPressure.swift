@@ -87,7 +87,7 @@ final class ForegroundPrefetchManager {
     }
 }
 
-/// 基于 `host_statistics64` 的近似可回收内存，用于避免在内存紧张时启动 Scene 分析 / 离线烘焙。
+/// 基于 `host_statistics64` 的近似可回收内存，用于限制图片封面回填的内存占用。
 enum SystemMemoryPressure {
     private static func kernelPageSize() -> vm_size_t {
         var sz: vm_size_t = 0
@@ -119,36 +119,4 @@ enum SystemMemoryPressure {
         return pages &* page
     }
 
-    /// `SceneBakeEligibilityAnalyzer` 可能整包读入 `scene.pkg`。
-    static let minBytesForEligibilityAnalysis: UInt64 = 480 * 1024 * 1024
-
-    /// CLI 烘焙子进程与编码峰值。
-    static let minBytesForOfflineBake: UInt64 = 1024 * 1024 * 1024
-
-    /// Vision optical-flow + BGRA reader/writer 导出会同时保留源帧、目标帧、光流场、
-    /// writer pool 和 VideoToolbox/Vision 的内部 scratch buffer。4K 视频的实际峰值
-    /// 往往远高于显式可见的 CVPixelBuffer 大小，所以这里按分辨率给离线补帧留出余量。
-    static let minBytesForFrameInterpolationExport: UInt64 = 1536 * 1024 * 1024
-
-    static func hasRoomForSceneEligibilityAnalysis() -> Bool {
-        approximateReclaimableBytes() >= minBytesForEligibilityAnalysis
-    }
-
-    static func hasRoomForSceneOfflineBake() -> Bool {
-        approximateReclaimableBytes() >= minBytesForOfflineBake
-    }
-
-    static func estimatedFrameInterpolationWorkingSetBytes(width: Int, height: Int) -> UInt64 {
-        let safeWidth = UInt64(max(1, width))
-        let safeHeight = UInt64(max(1, height))
-        let pixelCount = safeWidth &* safeHeight
-        // Per pixel: BGRA current/next/output/pool slack (~16 bytes),
-        // RG32F optical flow (~8 bytes), plus Vision/VT scratch multiplier.
-        let pixelScaledEstimate = pixelCount &* 96
-        return max(minBytesForFrameInterpolationExport, pixelScaledEstimate)
-    }
-
-    static func hasRoomForFrameInterpolationExport(width: Int, height: Int) -> Bool {
-        approximateReclaimableBytes() >= estimatedFrameInterpolationWorkingSetBytes(width: width, height: height)
-    }
 }

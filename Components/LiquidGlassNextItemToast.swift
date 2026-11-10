@@ -3,7 +3,7 @@ import Combine
 import Kingfisher
 
 // MARK: - 下一张项目数据协议
-/// 用于统一 Wallpaper 和 MediaItem 的预览数据
+/// Preview data for static wallpapers
 public protocol NextItemPreviewable {
     var previewId: String { get }
     var previewTitle: String { get }
@@ -12,14 +12,6 @@ public protocol NextItemPreviewable {
     var previewResolution: String { get }
     var previewBadge: String? { get }
     /// 下一张弹窗小图是否按 GIF 播放（默认仅根据 URL 是否含 `.gif` 判断）
-    var previewThumbnailPrefersAnimatedPlayback: Bool { get }
-}
-
-public extension NextItemPreviewable {
-    var previewThumbnailPrefersAnimatedPlayback: Bool {
-        guard let u = previewThumbnailURL else { return false }
-        return u.absoluteString.lowercased().contains(".gif")
-    }
 }
 
 // MARK: - Wallpaper 扩展
@@ -30,17 +22,6 @@ extension Wallpaper: NextItemPreviewable {
     public var previewThumbnailURL: URL? { thumbURL }
     public var previewResolution: String { resolution }
     public var previewBadge: String? { categoryDisplayName }
-}
-
-// MARK: - MediaItem 扩展
-extension MediaItem: NextItemPreviewable {
-    public var previewId: String { id }
-    public var previewTitle: String { title }
-    public var previewSubtitle: String { tags.first ?? collectionTitle ?? sourceName }
-    public var previewThumbnailURL: URL? { posterURL ?? thumbnailURL }
-    public var previewResolution: String { primaryBadgeText }
-    public var previewBadge: String? { previewVideoURL != nil ? "LIVE" : nil }
-    public var previewThumbnailPrefersAnimatedPlayback: Bool { shouldRenderThumbnailAsAnimatedImage }
 }
 
 // MARK: - 下一张项目数据源
@@ -300,18 +281,7 @@ public struct LiquidGlassNextItemToast: View {
         var body: some View {
             ZStack {
                 if let url = item.previewThumbnailURL {
-                    if item.previewThumbnailPrefersAnimatedPlayback {
-                        KFMediaCoverImage(
-                            url: url,
-                            animated: true,
-                            downsampleSize: Self.downsampleSize,
-                            fadeDuration: 0.3,
-                            loadFinished: nil,
-                            layoutSize: Self.thumbSize,
-                            playAnimatedImage: true,
-                            isVisible: true
-                        )
-                    } else {
+
                         KFImage(url)
                             .fade(duration: 0.3)
                             .placeholder { _ in
@@ -319,7 +289,6 @@ public struct LiquidGlassNextItemToast: View {
                             }
                             .resizable()
                             .aspectRatio(contentMode: .fill)
-                    }
                 } else {
                     PlaceholderView()
                 }

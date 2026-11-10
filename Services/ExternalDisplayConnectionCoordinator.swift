@@ -140,17 +140,10 @@ final class ExternalDisplayConnectionCoordinator: NSObject {
     }
 
     private func restorePreviousDisplayStateIfAvailable(for screen: NSScreen) async -> Bool {
-        if await VideoWallpaperManager.shared.restorePreviousVideoWallpaperIfAvailable(for: screen) {
-            return true
-        }
-        if await WallpaperEngineXBridge.shared.restorePreviousWallpaperIfAvailable(for: screen) {
-            return true
-        }
-        if StaticImageWallpaperOverlayManager.shared.restorePreviousImageIfAvailable(for: screen) {
-            return true
-        }
-        // Fallback: system-native static wallpaper (including video posters).
-        return DesktopWallpaperSyncManager.shared.hasPersistedWallpaperForFingerprint(screen.wallpaperScreenFingerprint)
+        let desktop = DesktopWallpaperSyncManager.shared
+        guard desktop.hasPersistedWallpaperForFingerprint(screen.wallpaperScreenFingerprint) else { return false }
+        desktop.syncOnAppActivation()
+        return true
     }
 
     private func presentNextPromptIfNeeded() {

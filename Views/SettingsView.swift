@@ -56,12 +56,8 @@ private final class DragHandleView: NSView {
 // MARK: - 设置标签
 private enum SettingsTab: String, CaseIterable, Identifiable {
     case general
-    case modules
     case download
     case wallhaven
-    case workshop
-    case pixiv
-    case konachan
     case scheduler
     case sync
     case about
@@ -71,12 +67,8 @@ private enum SettingsTab: String, CaseIterable, Identifiable {
     var title: String {
         switch self {
         case .general: return t("general")
-        case .modules: return t("settings.modules")
         case .download: return t("download")
         case .wallhaven: return t("wallhaven")
-        case .workshop: return t("wallpaperEngine")
-        case .pixiv: return "Pixiv"
-        case .konachan: return "Konachan"
         case .scheduler: return t("scheduler")
         case .sync: return t("cloudSync")
         case .about: return t("about")
@@ -86,12 +78,8 @@ private enum SettingsTab: String, CaseIterable, Identifiable {
     var icon: String {
         switch self {
         case .general: return "gearshape"
-        case .modules: return "square.grid.2x2"
         case .download: return "arrow.down.circle"
         case .wallhaven: return "w.circle"
-        case .workshop: return "gearshape.2" // Steam/Workshop 风格
-        case .pixiv: return "p.circle"
-        case .konachan: return "k.circle"
         case .scheduler: return "clock.arrow.circlepath"
         case .sync: return "icloud"
         case .about: return "info.circle"
@@ -181,18 +169,10 @@ struct SettingsView: View {
                     switch selectedTab {
                     case .general:
                         GeneralSettingsTab(viewModel: viewModel)
-                    case .modules:
-                        ModulesSettingsTab(viewModel: viewModel)
                     case .download:
                         DownloadSettingsTab(viewModel: viewModel)
                     case .wallhaven:
                         WallhavenSettingsTab(viewModel: viewModel)
-                    case .workshop:
-                        WorkshopSettingsTab(viewModel: viewModel)
-                    case .pixiv:
-                        PixivSettingsTab()
-                    case .konachan:
-                        KonachanSettingsTab()
                     case .scheduler:
                         SchedulerSettingsTab(viewModel: viewModel)
                     case .sync:
@@ -206,6 +186,7 @@ struct SettingsView: View {
         }
         .background(Color(hex: "1C1C1E"))
         .id(localization.currentLanguage)
+        .environment(\.locale, Locale(identifier: localization.currentLanguage.rawValue))
         .onAppear {
             let key = "settings.openSchedulerOnNextAppearance"
             if WaifuXPreferences.shared.bool(forKey: key) {
@@ -223,12 +204,8 @@ struct SettingsView: View {
     private static func settingsGuideAnchor(for tab: SettingsTab) -> GuideAnchorID {
         switch tab {
         case .general: return .settingsTabGeneral
-        case .modules: return .settingsTabModules
         case .download: return .settingsTabDownload
         case .wallhaven: return .settingsTabWallhaven
-        case .workshop: return .settingsTabWorkshop
-        case .pixiv: return .settingsTabPixiv
-        case .konachan: return .settingsTabKonachan
         case .scheduler: return .settingsTabScheduler
         case .sync: return .settingsTabSync
         case .about: return .settingsTabAbout
@@ -238,7 +215,7 @@ struct SettingsView: View {
     // MARK: 左侧导航栏
     private var sidebar: some View {
         VStack(alignment: .leading, spacing: 2) {
-            ForEach(SettingsTab.allCases.filter { $0 != .sync }, id: \.self) { tab in
+            ForEach(SettingsTab.allCases, id: \.self) { tab in
                 SidebarItem(
                     tab: tab,
                     isSelected: selectedTab == tab,
@@ -292,115 +269,19 @@ struct SettingsView: View {
 }
 
 // MARK: - 功能模块设置标签
-private struct ModulesSettingsTab: View {
-    @ObservedObject var viewModel: SettingsViewModel
-    @State private var showRestartConfirm = false
-
-    var body: some View {
-        MacSettingsForm {
-            // 功能模块开关组
-            MacSettingsSection(header: t("settings.modules.title")) {
-                MacSettingsRow(
-                    title: t("settings.modules.wallpaper"),
-                    subtitle: t("settings.modules.wallpaper.subtitle"),
-                    showDivider: true
-                ) {
-                    MacToggle(isOn: $viewModel.wallpaperModuleEnabled)
-                }
-
-                MacSettingsRow(
-                    title: t("settings.modules.media"),
-                    subtitle: t("settings.modules.media.subtitle"),
-                    showDivider: true
-                ) {
-                    MacToggle(isOn: $viewModel.mediaModuleEnabled)
-                }
-
-                MacSettingsRow(
-                    title: t("settings.modules.anime"),
-                    subtitle: t("settings.modules.anime.subtitle"),
-                    showDivider: false
-                ) {
-                    MacToggle(isOn: $viewModel.animeModuleEnabled)
-                }
-            }
-
-            // 待应用改动区块（仅当有改动时显示）
-            if viewModel.hasPendingModuleChanges {
-                MacSettingsSection(header: t("settings.modules.apply")) {
-                    MacSettingsRow(
-                        title: t("settings.modules.pending"),
-                        subtitle: viewModel.pendingModulesDescription,
-                        showDivider: false
-                    ) {
-                        Button(t("settings.modules.restartNow")) {
-                            confirmRestart()
-                        }
-                        .font(.system(size: 12, weight: .medium))
-                        .foregroundStyle(Color(hex: "0A84FF"))
-                    }
-                }
-            }
-        }
-        .glassAlert(t("settings.modules.restartConfirm.title"), isPresented: $showRestartConfirm,
-                    message: t("settings.modules.restartConfirm.message"),
-                    actions: [
-                        GlassAlertAction(t("settings.modules.restartNow")) {
-                            AppRelauncher.relaunch()
-                        },
-                        GlassAlertAction(t("cancel"), role: .cancel)
-                    ])
-    }
-
-    /// 重启确认弹窗
-    private func confirmRestart() {
-        showRestartConfirm = true
-    }
-}
 
 // MARK: - 通用设置标签
 private struct GeneralSettingsTab: View {
     @ObservedObject var viewModel: SettingsViewModel
     @ObservedObject private var arcSettings = ArcBackgroundSettings.shared
-    @State private var showClearLockScreenAlert = false
-    @State private var importProfileURL = ""
 
     /// 系统壁纸 store 的选择状态说明（设置页动态锁屏区展示）
-    private var lockScreenSelectionDescription: String {
-        switch viewModel.lockScreenSelectionStatus {
-        case .selected: return t("lockScreenSelectionSelected")
-        case .notSelected: return t("lockScreenSelectionNotSelected")
-        case .unknown: return t("lockScreenSelectionUnknown")
-        }
-    }
-
-    private var lockScreenSelectionColor: Color {
-        switch viewModel.lockScreenSelectionStatus {
-        case .selected: return Color(hex: "30D158")
-        case .notSelected: return Color(hex: "FF9F0A")
-        case .unknown: return Color.white.opacity(0.35)
-        }
-    }
 
     private var languageBinding: Binding<LocalizationService.Language> {
         Binding(
             get: { LocalizationService.shared.currentLanguage },
             set: { LocalizationService.shared.setLanguage($0) }
         )
-    }
-
-    private var needsWindowCoverageAccessibilityHint: Bool {
-        viewModel.pauseWhenWindowCoverage && !AXIsProcessTrusted()
-    }
-
-    private func openAccessibilitySettings() {
-        guard let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility") else { return }
-        NSWorkspace.shared.open(url)
-    }
-
-    private func openFullDiskAccessSettings() {
-        guard let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles") else { return }
-        NSWorkspace.shared.open(url)
     }
 
     var body: some View {
@@ -490,14 +371,6 @@ private struct GeneralSettingsTab: View {
                 }
 
                 MacSettingsRow(
-                    title: t("autoRemoveVideoLetterbox"),
-                    subtitle: t("autoRemoveVideoLetterboxDesc"),
-                    showDivider: true
-                ) {
-                    MacToggle(isOn: $viewModel.autoRemoveVideoLetterbox)
-                }
-
-                MacSettingsRow(
                     title: t("portraitBlurFill"),
                     subtitle: t("portraitBlurFillDesc"),
                     showDivider: false
@@ -506,246 +379,10 @@ private struct GeneralSettingsTab: View {
                 }
             }
 
-            // 动态壁纸设置组
-            MacSettingsSection(header: t("videoWallpaper")) {
-                // 系统壁纸同步总开关（默认开启）：关闭后冻结 setDesktopImageURL 链路，
-                // 仅 App 内 mp4/场景/web 动态壁纸引擎继续工作。
-                MacSettingsRow(
-                    title: t("systemWallpaperSync"),
-                    subtitle: t("systemWallpaperSyncDesc"),
-                    showDivider: true
-                ) {
-                    MacToggle(isOn: $viewModel.systemWallpaperSyncEnabled)
-                }
-                .onAppear { viewModel.refreshWallpaperCacheAccessStatus() }
 
-                MacSettingsRow(
-                    title: t("externalVideoRenderer"),
-                    subtitle: t("externalVideoRendererDesc"),
-                    showDivider: true
-                ) {
-                    MacToggle(isOn: $viewModel.externalVideoRendererEnabled)
-                }
 
-                MacSettingsRow(
-                    title: t("pauseWhenOtherAppForeground"),
-                    subtitle: t("pauseWhenOtherAppForegroundDesc"),
-                    showDivider: true
-                ) {
-                    MacToggle(isOn: Binding(
-                        get: { viewModel.pauseWhenOtherAppForeground },
-                        set: { newValue in
-                            viewModel.pauseWhenOtherAppForeground = newValue
-                            viewModel.syncAutoPauseSettings()
-                        }
-                    ))
-                }
-
-                MacSettingsRow(
-                    title: t("pauseInactiveDisplays"),
-                    subtitle: t("pauseInactiveDisplaysDesc"),
-                    showDivider: true
-                ) {
-                    MacToggle(isOn: Binding(
-                        get: { viewModel.pauseInactiveDisplays },
-                        set: { newValue in
-                            viewModel.pauseInactiveDisplays = newValue
-                            viewModel.syncAutoPauseSettings()
-                        }
-                    ))
-                }
-
-                MacSettingsRow(
-                    title: t("pauseWhenFullscreenCovers"),
-                    subtitle: t("pauseWhenFullscreenCoversDesc"),
-                    showDivider: true
-                ) {
-                    MacToggle(isOn: Binding(
-                        get: { viewModel.pauseWhenFullscreenCovers },
-                        set: { newValue in
-                            viewModel.pauseWhenFullscreenCovers = newValue
-                            viewModel.syncAutoPauseSettings()
-                        }
-                    ))
-                }
-
-                MacSettingsRow(
-                    title: t("pauseOnBatteryPower"),
-                    subtitle: t("pauseOnBatteryPowerDesc"),
-                    showDivider: true
-                ) {
-                    MacToggle(isOn: Binding(
-                        get: { viewModel.pauseOnBatteryPower },
-                        set: { newValue in
-                            viewModel.pauseOnBatteryPower = newValue
-                            viewModel.syncAutoPauseSettings()
-                        }
-                    ))
-                }
-
-                MacSettingsRow(
-                    title: t("pauseRotationOnBattery"),
-                    subtitle: t("pauseRotationOnBatteryDesc"),
-                    showDivider: true
-                ) {
-                    MacToggle(isOn: $viewModel.pauseRotationOnBattery)
-                }
-
-                // 壁纸扩展守护：App 退出后 pkd 清杀扩展时自动重新拉载
-                MacSettingsRow(
-                    title: t("wallpaperExtensionKeeper"),
-                    subtitle: t("wallpaperExtensionKeeperDesc"),
-                    showDivider: true
-                ) {
-                    MacToggle(isOn: $viewModel.wallpaperExtensionKeeperEnabled)
-                }
-
-                // 系统壁纸缓存授权提示：清理器改由主 App 执行后，「能不能读到缓存目录」
-                // 直接决定磁盘会不会无限增长，所以必须在用户可见处给出出口。
-                // 只在「同步开着（确实会产出这份缓存）且读不到」时才提示：
-                // 关掉同步的用户不产生该缓存，提示他们授权只是噪音；
-                // 这与 scheduleRun 在同步关闭时直接早退的逻辑保持一致。
-                if viewModel.systemWallpaperSyncEnabled,
-                   viewModel.wallpaperCacheInaccessibleRootCount > 0 {
-                    MacSettingsRow(
-                        title: t("wallpaperCacheAccessRequired"),
-                        subtitle: t("wallpaperCacheAccessRequiredDesc"),
-                        showDivider: true
-                    ) {
-                        Button {
-                            openFullDiskAccessSettings()
-                        } label: {
-                            Image(systemName: "arrow.up.forward.app")
-                                .font(.system(size: 13, weight: .medium))
-                                .foregroundStyle(Color(hex: "0A84FF"))
-                                .frame(width: 28, height: 24)
-                        }
-                        .buttonStyle(.plain)
-                        .help(t("openFullDiskAccessSettings"))
-                    }
-                }
-
-                MacSettingsRow(
-                    title: t("pauseWhenWindowCoverage"),
-                    subtitle: t("pauseWhenWindowCoverageDesc"),
-                    showDivider: !viewModel.pauseWhenWindowCoverage
-                ) {
-                    MacToggle(isOn: Binding(
-                        get: { viewModel.pauseWhenWindowCoverage },
-                        set: { newValue in
-                            viewModel.pauseWhenWindowCoverage = newValue
-                            viewModel.syncAutoPauseSettings()
-                        }
-                    ))
-                }
-
-                if viewModel.pauseWhenWindowCoverage {
-                    MacSettingsRow(
-                        title: t("windowCoverageThreshold"),
-                        showDivider: false
-                    ) {
-                        HStack(spacing: 8) {
-                            Text("\(Int(viewModel.windowCoveragePauseThreshold))%")
-                                .font(.system(size: 12, weight: .medium))
-                                .foregroundStyle(.secondary)
-                                .frame(minWidth: 36, alignment: .trailing)
-                            Slider(
-                                value: snappedSliderBinding(
-                                    $viewModel.windowCoveragePauseThreshold,
-                                    in: 30...100,
-                                    step: 5
-                                ),
-                                in: 30...100,
-                                onEditingChanged: { editing in
-                                    if !editing { viewModel.syncAutoPauseSettings() }
-                                }
-                            )
-                            .tint(settingsSliderTint)
-                            .accessibilityLabel(t("windowCoverageThreshold"))
-                            .frame(width: 120)
-                        }
-                    }
-
-                    if needsWindowCoverageAccessibilityHint {
-                        MacSettingsRow(
-                            title: t("windowCoverageAccessibilityRequired"),
-                            subtitle: t("windowCoverageAccessibilityDesc"),
-                            showDivider: true
-                        ) {
-                            Button {
-                                openAccessibilitySettings()
-                            } label: {
-                                Image(systemName: "arrow.up.forward.app")
-                                    .font(.system(size: 13, weight: .medium))
-                                    .foregroundStyle(Color(hex: "0A84FF"))
-                                    .frame(width: 28, height: 24)
-                            }
-                            .buttonStyle(.plain)
-                            .help(t("openAccessibilitySettings"))
-                        }
-                    }
-                }
-
-                MacSettingsRow(
-                    title: t("hdrEnabled"),
-                    subtitle: t("hdrEnabledDesc"),
-                    showDivider: false
-                ) {
-                    MacToggle(isOn: $viewModel.hdrEnabled)
-                }
-
-            }
-
-            MacSettingsSection(header: t("dynamicLockScreen")) {
-                // 动态锁屏壁纸开关（仅 macOS 26+ 可用）
-                if #available(macOS 26.0, *) {
-                    MacSettingsRow(
-                        title: t("dynamicLockScreen"),
-                        subtitle: t("dynamicLockScreenDesc"),
-                        showDivider: true
-                    ) {
-                        MacToggle(isOn: $viewModel.dynamicLockScreenEnabled)
-                    }
-                    .guideAnchor(.lockscreenToggle)
-                    .onChange(of: viewModel.dynamicLockScreenEnabled) { _, enabled in
-                        // 第一次打开开关时播教程：目标行必然可见，
-                        // 也不会和设置总览抢播放令牌（WaifuX GuideKit）。
-                        if enabled {
-                            viewModel.refreshLockScreenSelectionStatus()
-                            GuideEngine.shared.noteSheetOpened(GuideTours.lockscreen)
-                        }
-                    }
-
-                    MacSettingsRow(
-                        title: t("lockScreenSelectionStatus"),
-                        subtitle: lockScreenSelectionDescription,
-                        showDivider: true
-                    ) {
-                        Circle()
-                            .fill(lockScreenSelectionColor)
-                            .frame(width: 8, height: 8)
-                    }
-                    .guideAnchor(.lockscreenStatusRow)
-                    .onAppear {
-                        viewModel.refreshLockScreenSelectionStatus()
-                    }
-
-                    MacSettingsRow(
-                        title: t("clearLockScreenInstances"),
-                        subtitle: t("clearLockScreenInstancesDesc"),
-                        showDivider: false
-                    ) {
-                        Button(t("clear")) {
-                            showClearLockScreenAlert = true
-                        }
-                        .font(.system(size: 12, weight: .medium))
-                        .foregroundStyle(Color(hex: "FF453A"))
-                    }
-                }
-            }
 
             // 屏保组（安装/跟随状态，跟随桌面壁纸，与动态锁屏同语义）
-            ScreenSaverSettingsTab()
 
             // 代理设置组
             MacSettingsSection(header: t("proxySettings")) {
@@ -823,6 +460,10 @@ private struct GeneralSettingsTab: View {
                     MacToggle(isOn: $viewModel.swapMenuBarClickActions)
                 }
 
+                MacSettingsRow(title: t("pauseRotationOnBattery"), subtitle: t("pauseRotationOnBatteryDesc"), showDivider: true) {
+                    MacToggle(isOn: $viewModel.pauseRotationOnBattery)
+                }
+
                 MacSettingsRow(
                     title: t("preventSystemSleep"),
                     subtitle: t("preventSystemSleepDesc"),
@@ -831,31 +472,9 @@ private struct GeneralSettingsTab: View {
                     MacToggle(isOn: $viewModel.preventSystemSleep)
                 }
 
-                MacSettingsRow(
-                    title: t("hideNotch"),
-                    subtitle: t("hideNotchDesc"),
-                    showDivider: true
-                ) {
-                    MacToggle(isOn: $viewModel.hideNotch)
-                }
-
-                MacSettingsRow(
-                    title: t("saveToDownloadsFolder"),
-                    subtitle: nil,
-                    showDivider: false
-                ) {
-                    MacToggle(isOn: $viewModel.saveToDownloads)
-                }
             }
         }
-        .glassAlert(t("clearLockScreenInstances"), isPresented: $showClearLockScreenAlert,
-                    message: t("clearLockScreenInstancesConfirm"),
-                    actions: [
-                        GlassAlertAction(t("cancel"), role: .cancel),
-                        GlassAlertAction(t("clear"), role: .destructive) {
-                            viewModel.clearLockScreenInstances()
-                        }
-                    ])
+
     }
 
 }
@@ -873,13 +492,6 @@ private struct DownloadSettingsTab: View {
     var body: some View {
         MacSettingsForm {
             MacSettingsSection(header: t("downloadPreferences")) {
-                MacSettingsRow(
-                    title: t("saveToDownloadsFolder"),
-                    subtitle: t("saveToDownloadsDesc"),
-                    showDivider: true
-                ) {
-                    MacToggle(isOn: $viewModel.saveToDownloads)
-                }
 
                 // 下载目录选择
                 MacSettingsRow(
@@ -944,32 +556,7 @@ private struct DownloadSettingsTab: View {
                 }
             }
 
-            // 动态壁纸优化设置组。自动任务均由公共优化队列串行处理。
             // 手动「优化视频」始终可走循环分析 + 补帧；此处只控制下载后自动优化与目标帧率。
-            MacSettingsSection(header: t("videoOptimizationSection")) {
-                MacSettingsRow(
-                    title: t("videoOptimizationAutoAfterDownload"),
-                    subtitle: t("videoOptimizationAutoAfterDownloadDesc"),
-                    showDivider: true
-                ) {
-                    MacToggle(isOn: $viewModel.autoOptimizeVideosAfterDownload)
-                }
-
-                MacSettingsRow(
-                    title: t("frameInterpolationTargetFPS"),
-                    subtitle: nil,
-                    showDivider: false
-                ) {
-                    Picker("", selection: $viewModel.frameInterpolationTargetFPS) {
-                        ForEach(FrameInterpolationTargetFPSResolver.allowedFixedFPSValues, id: \.self) { fps in
-                            Text("\(fps)")
-                                .tag(Double(fps))
-                        }
-                    }
-                    .pickerStyle(.segmented)
-                    .frame(width: 180)
-                }
-            }
 
             // 缓存管理
             MacSettingsSection(header: t("dataManagement")) {
@@ -1195,9 +782,7 @@ private struct SchedulerSettingsTab: View {
                     }
                 }
                 Divider()
-                Button(intervalLabel(for: SchedulerConfig.intervalOnEndMinutes)) {
-                    viewModel.schedulerViewModel.updateGlobalDisplayInterval(SchedulerConfig.intervalOnEndMinutes)
-                }
+
                 Button(intervalLabel(for: SchedulerConfig.intervalOnUnlockMinutes)) {
                     viewModel.schedulerViewModel.updateGlobalDisplayInterval(SchedulerConfig.intervalOnUnlockMinutes)
                 }
@@ -1210,50 +795,6 @@ private struct SchedulerSettingsTab: View {
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 12)
-
-        if config.isOnEndMode {
-            dividerLine
-
-            VStack(spacing: 8) {
-                HStack(spacing: 12) {
-                    Text(t("webSceneSwitchInterval"))
-                        .font(.system(size: 13, weight: .medium))
-                        .foregroundStyle(Color.white.opacity(0.9))
-
-                    Spacer()
-
-                    let seconds = config.webSceneSwitchSeconds ?? 0
-                    if seconds == 0 {
-                        Text(t("intervalOnEnd"))
-                            .font(.system(size: 12, weight: .regular))
-                            .foregroundStyle(Color.white.opacity(0.6))
-                    } else {
-                        Text(seconds >= 60 ? "\(seconds / 60) \(t("minutes"))" : "\(seconds) \(t("seconds"))")
-                            .font(.system(size: 12, weight: .regular))
-                            .foregroundStyle(Color.white.opacity(0.6))
-                    }
-                }
-
-                Slider(
-                    value: snappedSliderBinding(
-                        Binding(
-                            get: { Double(config.webSceneSwitchSeconds ?? 0) },
-                            set: { newValue in
-                                let intVal = Int(newValue)
-                                viewModel.schedulerViewModel.updateGlobalDisplayWebSceneSwitchSeconds(intVal == 0 ? nil : intVal)
-                            }
-                        ),
-                        in: 0...3600,
-                        step: 10
-                    ),
-                    in: 0...3600
-                )
-                .tint(settingsSliderTint)
-                .accessibilityLabel(t("webSceneSwitchInterval"))
-            }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 12)
-        }
 
         dividerLine
 
@@ -1279,44 +820,10 @@ private struct SchedulerSettingsTab: View {
 
         dividerLine
 
-        HStack(spacing: 12) {
-            Text(t("contentTypes"))
-                .font(.system(size: 13, weight: .medium))
-                .foregroundStyle(Color.white.opacity(0.9))
-
-            Spacer()
-
-            HStack(spacing: 16) {
-                Toggle(isOn: Binding(
-                    get: { config.includeWallpapers },
-                    set: { viewModel.schedulerViewModel.updateGlobalDisplayIncludeWallpapers($0) }
-                )) {
-                    Text(t("wallpapers"))
-                        .font(.system(size: 12))
-                        .foregroundStyle(Color.white.opacity(0.8))
-                }
-                .toggleStyle(.checkbox)
-
-                Toggle(isOn: Binding(
-                    get: { config.includeMedia },
-                    set: { viewModel.schedulerViewModel.updateGlobalDisplayIncludeMedia($0) }
-                )) {
-                    Text(t("media"))
-                        .font(.system(size: 12))
-                        .foregroundStyle(Color.white.opacity(0.8))
-                }
-                .toggleStyle(.checkbox)
-            }
-        }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 12)
-
         dividerLine
 
         GlobalFolderPickerRow(
             folderIDs: config.folderIDs,
-            includeWallpapers: config.includeWallpapers,
-            includeMedia: config.includeMedia,
             viewModel: viewModel
         )
         .padding(.horizontal, 16)
@@ -1340,9 +847,7 @@ private struct SchedulerSettingsTab: View {
                     }
                 }
                 Divider()
-                Button(intervalLabel(for: SchedulerConfig.intervalOnEndMinutes)) {
-                    viewModel.schedulerViewModel.updateDisplayInterval(SchedulerConfig.intervalOnEndMinutes, for: screenID)
-                }
+
                 Button(intervalLabel(for: SchedulerConfig.intervalOnUnlockMinutes)) {
                     viewModel.schedulerViewModel.updateDisplayInterval(SchedulerConfig.intervalOnUnlockMinutes, for: screenID)
                 }
@@ -1357,49 +862,6 @@ private struct SchedulerSettingsTab: View {
         .padding(.vertical, 12)
 
         // "播完即换"模式下的 Web/Scene 壁纸切换间隔滑块
-        if config.isOnEndMode {
-            dividerLine
-
-            VStack(spacing: 8) {
-                HStack(spacing: 12) {
-                    Text(t("webSceneSwitchInterval"))
-                        .font(.system(size: 13, weight: .medium))
-                        .foregroundStyle(Color.white.opacity(0.9))
-
-                    Spacer()
-
-                    let seconds = config.webSceneSwitchSeconds ?? 0
-                    if seconds == 0 {
-                        Text(t("intervalOnEnd"))
-                            .font(.system(size: 12, weight: .regular))
-                            .foregroundStyle(Color.white.opacity(0.6))
-                    } else {
-                        Text(seconds >= 60 ? "\(seconds / 60) \(t("minutes"))" : "\(seconds) \(t("seconds"))")
-                            .font(.system(size: 12, weight: .regular))
-                            .foregroundStyle(Color.white.opacity(0.6))
-                    }
-                }
-
-                Slider(
-                    value: snappedSliderBinding(
-                        Binding(
-                            get: { Double(config.webSceneSwitchSeconds ?? 0) },
-                            set: { newValue in
-                                let intVal = Int(newValue)
-                                viewModel.schedulerViewModel.updateDisplayWebSceneSwitchSeconds(intVal == 0 ? nil : intVal, for: screenID)
-                            }
-                        ),
-                        in: 0...3600,
-                        step: 10
-                    ),
-                    in: 0...3600
-                )
-                .tint(settingsSliderTint)
-                .accessibilityLabel(t("webSceneSwitchInterval"))
-            }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 12)
-        }
 
         dividerLine
 
@@ -1427,49 +889,12 @@ private struct SchedulerSettingsTab: View {
         dividerLine
 
         // 内容类型选择
-        HStack(spacing: 12) {
-            Text(t("contentTypes"))
-                .font(.system(size: 13, weight: .medium))
-                .foregroundStyle(Color.white.opacity(0.9))
-
-            Spacer()
-
-            HStack(spacing: 16) {
-                Toggle(isOn: Binding(
-                    get: { config.includeWallpapers },
-                    set: { newValue in
-                        viewModel.schedulerViewModel.updateDisplayIncludeWallpapers(newValue, for: screenID)
-                    }
-                )) {
-                    Text(t("wallpapers"))
-                        .font(.system(size: 12))
-                        .foregroundStyle(Color.white.opacity(0.8))
-                }
-                .toggleStyle(.checkbox)
-
-                Toggle(isOn: Binding(
-                    get: { config.includeMedia },
-                    set: { newValue in
-                        viewModel.schedulerViewModel.updateDisplayIncludeMedia(newValue, for: screenID)
-                    }
-                )) {
-                    Text(t("media"))
-                        .font(.system(size: 12))
-                        .foregroundStyle(Color.white.opacity(0.8))
-                }
-                .toggleStyle(.checkbox)
-            }
-        }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 12)
 
         dividerLine
 
         // 文件夹选择
         FolderPickerRow(
             folderIDs: config.folderIDs,
-            includeWallpapers: config.includeWallpapers,
-            includeMedia: config.includeMedia,
             screenID: screenID,
             viewModel: viewModel
         )
@@ -1480,15 +905,13 @@ private struct SchedulerSettingsTab: View {
     // MARK: - 文件夹选择组件（支持多选）
     private struct FolderPickerRow: View {
         let folderIDs: [String]?
-        let includeWallpapers: Bool
-        let includeMedia: Bool
         let screenID: String
         @ObservedObject var viewModel: SettingsViewModel
         @ObservedObject private var folderStore = LibraryFolderStore.shared
 
         var body: some View {
             HStack(spacing: 12) {
-                Text("文件夹")
+                Text(t("folders"))
                     .font(.system(size: 13, weight: .medium))
                     .foregroundStyle(Color.white.opacity(0.9))
 
@@ -1499,7 +922,7 @@ private struct SchedulerSettingsTab: View {
                         viewModel.schedulerViewModel.updateDisplayFolderIDs(nil, for: screenID)
                     }) {
                         HStack {
-                            Text("全部")
+                            Text(t("ruleMarket.all"))
                             if folderIDs == nil {
                                 Image(systemName: "checkmark")
                             }
@@ -1535,8 +958,7 @@ private struct SchedulerSettingsTab: View {
 
         private var allFolders: [LibraryFolder] {
             var combined: [LibraryFolder] = []
-            if includeWallpapers { combined.append(contentsOf: folderStore.folders(for: .wallpaper)) }
-            if includeMedia { combined.append(contentsOf: folderStore.folders(for: .media)) }
+            combined.append(contentsOf: folderStore.folders(for: .wallpaper))
             return combined.sorted { lhs, rhs in
                 let nameOrder = lhs.name.localizedStandardCompare(rhs.name)
                 if nameOrder != .orderedSame { return nameOrder == .orderedAscending }
@@ -1593,12 +1015,12 @@ private struct SchedulerSettingsTab: View {
         }
 
         private var folderIDsLabel: String {
-            guard let folderIDs else { return "全部" }
-            if folderIDs.isEmpty { return "全部" }
+            guard let folderIDs else { return t("ruleMarket.all") }
+            if folderIDs.isEmpty { return t("ruleMarket.all") }
             let names = folderIDs.compactMap { id in
                 allFolders.first(where: { $0.id == id }).map(folderOptionLabel)
             }
-            if names.isEmpty { return "全部" }
+            if names.isEmpty { return t("ruleMarket.all") }
             if names.count == 1 { return names[0] }
             if names.count <= 3 {
                 return names.joined(separator: ", ")
@@ -1607,7 +1029,7 @@ private struct SchedulerSettingsTab: View {
         }
 
         private func folderOptionLabel(for folder: LibraryFolder) -> String {
-            let contentType = folder.contentType == .wallpaper ? t("wallpapers") : t("media")
+            let contentType = t("wallpapers")
             return "\(contentType) · \(folder.name)"
         }
     }
@@ -1615,8 +1037,6 @@ private struct SchedulerSettingsTab: View {
     // MARK: - Global folder picker (multi-select against the shared global policy)
     private struct GlobalFolderPickerRow: View {
         let folderIDs: [String]?
-        let includeWallpapers: Bool
-        let includeMedia: Bool
         @ObservedObject var viewModel: SettingsViewModel
         @ObservedObject private var folderStore = LibraryFolderStore.shared
 
@@ -1669,8 +1089,7 @@ private struct SchedulerSettingsTab: View {
 
         private var allFolders: [LibraryFolder] {
             var combined: [LibraryFolder] = []
-            if includeWallpapers { combined.append(contentsOf: folderStore.folders(for: .wallpaper)) }
-            if includeMedia { combined.append(contentsOf: folderStore.folders(for: .media)) }
+            combined.append(contentsOf: folderStore.folders(for: .wallpaper))
             return combined.sorted { lhs, rhs in
                 let nameOrder = lhs.name.localizedStandardCompare(rhs.name)
                 if nameOrder != .orderedSame { return nameOrder == .orderedAscending }
@@ -1733,7 +1152,7 @@ private struct SchedulerSettingsTab: View {
         }
 
         private func folderOptionLabel(for folder: LibraryFolder) -> String {
-            let contentType = folder.contentType == .wallpaper ? t("wallpapers") : t("media")
+            let contentType = t("wallpapers")
             return "\(contentType) · \(folder.name)"
         }
     }
@@ -1745,9 +1164,7 @@ private struct SchedulerSettingsTab: View {
     }
 
     private func intervalLabel(for minutes: Int) -> String {
-        if minutes == SchedulerConfig.intervalOnEndMinutes {
-            return t("intervalOnEnd")
-        }
+
         if minutes == SchedulerConfig.intervalOnUnlockMinutes {
             return t("intervalOnUnlock")
         }
@@ -1765,12 +1182,17 @@ private struct SchedulerSettingsTab: View {
     }
 }
 
-
-
 // MARK: - 关于设置标签
 private struct AboutSettingsTab: View {
+    private static var currentArchitecture: String {
+        #if arch(arm64)
+        "arm64"
+        #else
+        "x86_64"
+        #endif
+    }
+
     @ObservedObject var viewModel: SettingsViewModel
-    @State private var showResetAlert = false
     @State private var showExportLogConfirm = false
     @State private var showExportResultAlert = false
     @State private var exportedLogURL: URL?
@@ -1786,14 +1208,14 @@ private struct AboutSettingsTab: View {
                 // 项目信息组
                 MacSettingsSection(header: t("projectInfo")) {
                     infoRow(title: t("developer"), value: "jipika", isLast: false)
-                    infoRow(title: t("animeRuleSource"), value: "KazumiRules", isLast: false)
+
                     infoRow(title: t("techStack"), value: "SwiftUI + AppKit", isLast: true)
                 }
 
                 // 链接组
                 MacSettingsSection(header: t("links")) {
                     MacLinkRow(title: t("visitWebsite"), action: {
-                        if let url = URL(string: "https://jipika.github.io/WaifuX") {
+                        if let url = URL(string: "https://github.com/jesusjodar/WaifuX") {
                             NSWorkspace.shared.open(url)
                         }
                     })
@@ -1801,22 +1223,16 @@ private struct AboutSettingsTab: View {
                     Divider().background(Color.white.opacity(0.06)).padding(.leading, 16)
 
                     MacLinkRow(title: t("reportProblem"), action: {
-                        if let url = URL(string: "https://github.com/jipika/WaifuX/issues") {
+                        if let url = URL(string: "https://github.com/jesusjodar/WaifuX/issues") {
                             NSWorkspace.shared.open(url)
                         }
                     })
 
                     Divider().background(Color.white.opacity(0.06)).padding(.leading, 16)
 
-                    MacLinkRow(title: t("joinQQGroup"), action: {
-                        if let url = URL(string: "https://qm.qq.com/q/SRCj8msygq") {
-                            NSWorkspace.shared.open(url)
-                        }
-                    })
 
                     Divider().background(Color.white.opacity(0.06)).padding(.leading, 16)
 
-                    MacRewardRow(title: t("reward"), imageName: "RewardQRCode")
                 }
 
                 // 日志诊断组
@@ -1827,32 +1243,8 @@ private struct AboutSettingsTab: View {
                 }
 
                 // 重置所有数据
-                MacSettingsSection(header: t("resetAllData")) {
-                    HStack(spacing: 12) {
-                        Text(t("resetAllData"))
-                            .font(.system(size: 13, weight: .medium))
-                            .foregroundStyle(Color.white.opacity(0.9))
 
-                        Spacer()
-
-                        Button(t("reset")) {
-                            showResetAlert = true
-                        }
-                        .font(.system(size: 12, weight: .medium))
-                        .foregroundStyle(Color(hex: "FF453A"))
-                    }
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 12)
-                }
             }
-            .glassAlert(t("resetAllData"), isPresented: $showResetAlert,
-                        message: t("resetAllDataConfirm"),
-                        actions: [
-                            GlassAlertAction(t("cancel"), role: .cancel),
-                            GlassAlertAction(t("reset"), role: .destructive) {
-                                Task { await viewModel.resetAllData() }
-                            }
-                        ])
             .glassAlert(t("settings.exportLog"), isPresented: $showExportLogConfirm,
                         message: t("settings.exportLog.confirm"),
                         actions: [
@@ -1929,7 +1321,7 @@ private struct AboutSettingsTab: View {
                             .font(.system(size: 17, weight: .bold))
                             .foregroundStyle(Color.white.opacity(0.92))
 
-                        Text("\(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "") · \(WallpaperEngineAvailability.currentArchitecture)版")
+                        Text("\(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "") · \(Self.currentArchitecture)")
                             .font(.system(size: 11.5, weight: .regular))
                             .foregroundStyle(Color.white.opacity(0.4))
                     }
@@ -1943,7 +1335,7 @@ private struct AboutSettingsTab: View {
                         HStack(spacing: 6) {
                             Image(systemName: "arrow.clockwise")
                                 .font(.system(size: 12))
-                            Text("检查更新")
+                            Text(t("checkForUpdates"))
                                 .font(.system(size: 13))
                         }
                         .frame(height: 28)
@@ -1951,941 +1343,13 @@ private struct AboutSettingsTab: View {
                     .buttonStyle(.bordered)
                 }
 
-                Divider()
-                HStack(spacing: 12) {
-                    Image(systemName: "shippingbox")
-                        .font(.system(size: 20))
-                        .foregroundStyle(.secondary)
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text("渲染组件").font(.system(size: 13, weight: .medium))
-                        Text("Scene、Web 与视频引擎可独立更新")
-                            .font(.system(size: 11.5)).foregroundStyle(.secondary)
-                    }
-                    Spacer()
-                    Button("检查组件更新") {
-                        RendererComponentUpdater.shared.check(userInitiated: true)
-                    }
-                    .buttonStyle(.bordered)
-                }
             }
             .padding(14)
         }
     }
 }
 
-
 // MARK: - Workshop 设置标签
-private enum SteamLoginMethod {
-    case qr
-    case password
-}
-
-private struct WorkshopSettingsTab: View {
-    @ObservedObject var viewModel: SettingsViewModel
-    @ObservedObject private var sourceManager = WorkshopSourceManager.shared
-    @ObservedObject private var workshopService = WorkshopService.shared
-    @ObservedObject private var steamService = SteamServiceManager.shared
-    @ObservedObject private var clockSettings = LiquidGlassClockSettings.shared
-    @State private var steamUsername = ""
-    @State private var steamPassword = ""
-    @State private var steamGuardCode = ""
-    @State private var isSteamPasswordVisible = false
-    @State private var showLoginForm = false
-    @State private var steamLoginMethod: SteamLoginMethod = .qr
-    @State private var isVerifyingSteamLogin = false
-    @State private var steamLoginStatusText: String?
-    @State private var cleanupResult: (count: Int, bytesFreed: Int64)?
-    @State private var isCleaningUp = false
-
-    /// 所有已连接显示器的最高刷新率，作为 FPS 滑块的上限
-    private var maxSliderFPS: Double {
-        Double(NSScreen.screens.map(\.maxRefreshRate).max() ?? 60)
-    }
-
-    var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 24) {
-                // 标题
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(t("wallpaperEngineSettings"))
-                        .font(.system(size: 20, weight: .bold))
-                    Text(t("wallpaperEngineSettingsDesc"))
-                        .font(.system(size: 12))
-                        .foregroundStyle(.secondary)
-                }
-
-                Divider()
-
-                steamServiceStatusSection
-
-                steamLoginSection
-
-                MacSettingsSection {
-                    MacSettingsRow(
-                        title: t("workshop.subscriptionAutomation"),
-                        subtitle: t("workshop.subscriptionAutomationDesc"),
-                        showDivider: false
-                    ) {
-                        MacToggle(isOn: $viewModel.workshopSubscriptionAutomationEnabled)
-                    }
-                }
-
-                // 场景壁纸实时渲染模式
-                MacSettingsSection {
-                    MacSettingsRow(title: t("workshop.sceneRealtimeRendering"), subtitle: t("workshop.sceneRealtimeRenderingDesc"), showDivider: false) {
-                        MacToggle(isOn: Binding(
-                            get: { viewModel.sceneRealtimeRenderingEnabled },
-                            set: { newValue in
-                                viewModel.sceneRealtimeRenderingEnabled = newValue
-                                // 与桌面动态元素互斥
-                                if newValue && clockSettings.config.enabled {
-                                    clockSettings.update { $0.enabled = false }
-                                }
-                            }
-                        ))
-                    }
-                }
-
-                // 超分辨率模式
-                MacSettingsSection {
-                    MacSettingsRow(title: t("workshop.upscalingMode"), subtitle: t("workshop.upscalingModeDesc"), showDivider: true) {
-                        MacToggle(isOn: Binding(
-                            get: { viewModel.upscalingEnabled },
-                            set: { viewModel.upscalingEnabled = $0 }
-                        ))
-                    }
-
-                    if viewModel.upscalingEnabled {
-                        MacSettingsRow(title: t("workshop.upscalingRatio"), showDivider: true) {
-                            HStack(spacing: 8) {
-                                Text("\(Int(viewModel.upscalingPercent))%")
-                                    .font(.system(size: 12, weight: .medium))
-                                    .foregroundStyle(.secondary)
-                                    .frame(minWidth: 36, alignment: .trailing)
-                                Slider(
-                                    value: snappedSliderBinding($viewModel.upscalingPercent, in: 30...100, step: 5),
-                                    in: 30...100
-                                )
-                                .tint(settingsSliderTint)
-                                .accessibilityLabel(t("workshop.upscalingRatio"))
-                                .frame(width: 120)
-                            }
-                        }
-
-                        MacSettingsRow(title: t("workshop.effectReduction"), subtitle: t("workshop.effectReductionDesc"), showDivider: false) {
-                            MacToggle(isOn: Binding(
-                                get: { viewModel.effectReductionEnabled },
-                                set: { viewModel.effectReductionEnabled = $0 }
-                            ))
-                        }
-                    }
-                }
-
-                // 渲染帧率上限
-                VStack(alignment: .leading, spacing: 6) {
-                    MacSettingsSection {
-                        MacSettingsRow(title: t("workshop.fps"), subtitle: t("workshop.fpsDesc")) {
-                            HStack(spacing: 8) {
-                                Text("\(Int(viewModel.wallpaperEngineFPS)) FPS")
-                                    .font(.system(size: 12, weight: .medium))
-                                    .foregroundStyle(.secondary)
-                                    .frame(minWidth: 52, alignment: .trailing)
-                                Slider(
-                                    value: snappedSliderBinding(
-                                        $viewModel.wallpaperEngineFPS,
-                                        in: 60...max(60, maxSliderFPS),
-                                        step: 5
-                                    ),
-                                    in: 60...max(60, maxSliderFPS)
-                                )
-                                .tint(settingsSliderTint)
-                                .accessibilityLabel(t("workshop.fps"))
-                                .frame(width: 120)
-                            }
-                        }
-                        MacSettingsRow(title: t("workshop.perfMode"), subtitle: t("workshop.perfModeDesc"), showDivider: false) {
-                            Picker("", selection: $viewModel.wallpaperPerfMode) {
-                                Text(t("workshop.perfModeHigh")).tag("high")
-                                Text(t("workshop.perfModeBalanced")).tag("balanced")
-                                Text(t("workshop.perfModePower")).tag("power")
-                            }
-                            .pickerStyle(.segmented)
-                            .frame(width: 180)
-                        }
-                        MacSettingsRow(title: t("workshop.webRenderScale"), subtitle: t("workshop.webRenderScaleDesc"), showDivider: false) {
-                            HStack(spacing: 8) {
-                                Text("\(Int(viewModel.webWallpaperRenderScalePercent))%")
-                                    .font(.system(size: 12, weight: .medium))
-                                    .foregroundStyle(.secondary)
-                                    .frame(minWidth: 52, alignment: .trailing)
-                                Slider(
-                                    value: snappedSliderBinding(
-                                        $viewModel.webWallpaperRenderScalePercent,
-                                        in: 50...100,
-                                        step: 5
-                                    ),
-                                    in: 50...100
-                                )
-                                .tint(settingsSliderTint)
-                                .accessibilityLabel(t("workshop.webRenderScale"))
-                                .frame(width: 120)
-                            }
-                        }
-                    }
-                    Text(t("workshop.fpsHint"))
-                        .font(.system(size: 11))
-                        .foregroundStyle(.secondary.opacity(0.75))
-                        .padding(.leading, 2)
-                }
-
-                // 桌面动态元素（时钟、音频柱状图等）
-                MacSettingsSection {
-                    MacSettingsRow(title: t("workshop.desktopDynamicElements"), subtitle: t("workshop.desktopDynamicElementsDesc"), showDivider: false) {
-                        MacToggle(isOn: Binding(
-                            get: { clockSettings.config.enabled },
-                            set: { newValue in
-                                clockSettings.update { $0.enabled = newValue }
-                                // 与场景壁纸实时渲染互斥
-                                if newValue && viewModel.sceneRealtimeRenderingEnabled {
-                                    viewModel.sceneRealtimeRenderingEnabled = false
-                                }
-                            }
-                        ))
-                    }
-                }
-
-                // 烘焙帧率
-                MacSettingsSection {
-                    MacSettingsRow(title: t("workshop.bakeFps"), subtitle: t("workshop.bakeFpsDesc"), showDivider: true) {
-                        HStack(spacing: 8) {
-                            Text("\(Int(viewModel.sceneBakeFPS)) FPS")
-                                .font(.system(size: 12, weight: .medium))
-                                .foregroundStyle(.secondary)
-                                .frame(minWidth: 52, alignment: .trailing)
-                            Slider(
-                                value: snappedSliderBinding(
-                                    $viewModel.sceneBakeFPS,
-                                    in: 15...maxSliderFPS,
-                                    step: 5
-                                ),
-                                in: 15...maxSliderFPS
-                            )
-                            .tint(settingsSliderTint)
-                            .accessibilityLabel(t("workshop.bakeFps"))
-                            .frame(width: 120)
-                        }
-                    }
-
-                    MacSettingsRow(title: t("workshop.bakeDuration"), subtitle: t("workshop.bakeDurationDesc"), showDivider: true) {
-                        HStack(spacing: 8) {
-                            Text("\(Int(viewModel.sceneBakeDuration))s")
-                                .font(.system(size: 12, weight: .medium))
-                                .foregroundStyle(.secondary)
-                                .frame(minWidth: 36, alignment: .trailing)
-                            Slider(
-                                value: snappedSliderBinding($viewModel.sceneBakeDuration, in: 5...60, step: 5),
-                                in: 5...60
-                            )
-                            .tint(settingsSliderTint)
-                            .accessibilityLabel(t("workshop.bakeDuration"))
-                            .frame(width: 120)
-                        }
-                    }
-
-                    MacSettingsRow(title: t("workshop.autoBakeScene"), subtitle: t("workshop.autoBakeSceneDesc"), showDivider: false) {
-                        MacToggle(isOn: $viewModel.autoBakeScene)
-                    }
-                }
-
-                // 显示全部内容（仅登录 Steam 后显示）
-                if sourceManager.isSteamAuthenticated {
-                    MacSettingsSection {
-                        MacSettingsRow(title: t("workshop.showAllContent"), subtitle: t("workshop.showAllContentDesc"), showDivider: false) {
-                            MacToggle(isOn: Binding(
-                                get: { viewModel.showAllWorkshopContent },
-                                set: { viewModel.showAllWorkshopContent = $0 }
-                            ))
-                        }
-                    }
-                }
-
-                // 清理下载缓存
-                cleanupSection
-
-                Spacer()
-            }
-            .padding(24)
-        }
-        .onAppear {
-            steamService.start()
-            sourceManager.refreshStoredSteamIdentity()
-            syncCredentialPresentation()
-        }
-        .onChange(of: sourceManager.steamCredentialState) { _, _ in
-            syncCredentialPresentation()
-        }
-        .onChange(of: steamService.loginState) { _, newState in
-            handleSteamLoginStateChange(newState)
-        }
-    }
-
-    private var steamLoginSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                Image(systemName: "person.badge.key.fill")
-                    .font(.system(size: 14))
-                    .foregroundStyle(.cyan)
-                Text(t("steamServiceAccount"))
-                    .font(.system(size: 14, weight: .semibold))
-                Spacer()
-                if case .available = sourceManager.steamCredentialState {
-                    Label("已保存用户名", systemImage: "person.crop.circle.badge.checkmark")
-                        .font(.system(size: 12))
-                        .foregroundStyle(.secondary)
-                }
-            }
-
-            if case .available(let username) = sourceManager.steamCredentialState, !showLoginForm, !isSteamQRFlowActive {
-                HStack {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(String(format: t("accountSaved"), username))
-                            .font(.system(size: 13))
-                            .foregroundStyle(.secondary)
-                        Text("下载会复用 WaifuX 的 Steam 会话。密码和 Guard 验证码不会保存。")
-                            .font(.system(size: 11))
-                            .foregroundStyle(.secondary.opacity(0.85))
-                        if let steamLoginStatusText {
-                            Text(steamLoginStatusText)
-                                .font(.system(size: 10))
-                                .foregroundStyle(loginStatusColor)
-                        }
-                    }
-                    Spacer()
-                    Button(t("relogin")) {
-                        steamUsername = username
-                        steamPassword = ""
-                        steamGuardCode = ""
-                        steamLoginStatusText = nil
-                        steamLoginMethod = .password
-                        showLoginForm = true
-                    }
-                    .controlSize(.small)
-                    Button(t("logout")) {
-                        SteamServiceManager.shared.logout()
-                        sourceManager.clearSteamIdentity()
-                        steamUsername = ""
-                        steamPassword = ""
-                        steamGuardCode = ""
-                        steamLoginStatusText = "已清除已保存账号。"
-                        showLoginForm = true
-                    }
-                    .controlSize(.small)
-                }
-                .padding(12)
-                .background(Color.white.opacity(0.03))
-                .cornerRadius(8)
-            } else if steamLoginMethod == .qr, !isVerifyingSteamLogin {
-                steamQRLoginView
-            } else {
-                VStack(alignment: .leading, spacing: 10) {
-                    HStack(spacing: 10) {
-                        Label(credentialStateTitle, systemImage: credentialStateIcon)
-                            .font(.system(size: 12, weight: .medium))
-                            .foregroundStyle(credentialStateColor)
-                        Spacer()
-                    }
-
-                    Text(credentialStateDescription)
-                        .font(.system(size: 11))
-                        .foregroundStyle(.secondary)
-
-                    TextField(t("steamUsernamePlaceholder"), text: $steamUsername)
-                        .textFieldStyle(.roundedBorder)
-                    steamPasswordField
-                    TextField(t("steamGuardCodePlaceholder"), text: $steamGuardCode)
-                        .textFieldStyle(.roundedBorder)
-                    Text("只有在邮箱验证码或备用令牌场景下才需要填写验证码；大多数情况下可以留空，按提示去 Steam App 里确认即可。")
-                        .font(.system(size: 11))
-                        .foregroundStyle(.secondary)
-
-                    HStack(alignment: .top) {
-                        if isVerifyingSteamLogin {
-                            ProgressView()
-                                .scaleEffect(0.8)
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(isWaitingForSteamGuardCode ? "Steam 正在等待验证码…" : "正在验证账号并连接 Steam…")
-                                    .font(.system(size: 11))
-                                    .foregroundStyle(.secondary)
-                                Text(isWaitingForSteamGuardCode
-                                     ? "输入收到的 Steam Guard 验证码后提交。"
-                                     : t("steamLoginMobileConfirmHint"))
-                                    .font(.system(size: 10))
-                                    .foregroundStyle(.tertiary)
-                            }
-                        } else if let steamLoginStatusText {
-                            Text(steamLoginStatusText)
-                                .font(.system(size: 11))
-                                .foregroundStyle(loginStatusColor)
-                        }
-
-                        Spacer()
-
-                        if isVerifyingSteamLogin {
-                            Button("取消") {
-                                SteamServiceManager.shared.cancelLogin()
-                            }
-                            .controlSize(.small)
-                        } else if case .available = sourceManager.steamCredentialState {
-                            Button("取消") {
-                                showLoginForm = false
-                                steamPassword = ""
-                                steamGuardCode = ""
-                                steamLoginStatusText = nil
-                            }
-                            .controlSize(.small)
-                        }
-
-                        Button(isWaitingForSteamGuardCode ? "提交验证码" : "验证并保存") {
-                            if isWaitingForSteamGuardCode {
-                                SteamServiceManager.shared.submitGuardCode(steamGuardCode)
-                                steamGuardCode = ""
-                                steamLoginStatusText = "验证码已提交，正在等待 Steam 验证。"
-                                return
-                            }
-
-                            guard !steamUsername.isEmpty, !steamPassword.isEmpty else { return }
-                            isVerifyingSteamLogin = true
-                            steamLoginStatusText = nil
-                            Task {
-                                do {
-                                    try await workshopService.verifySteamLogin(
-                                        username: steamUsername,
-                                        password: steamPassword,
-                                        guardCode: steamGuardCode
-                                    )
-                                    PersistentDownloadQueueService.shared.resumeWaitingForSteamLogin()
-                                    await MainActor.run {
-                                        sourceManager.setSteamIdentity(username: steamUsername)
-                                        if !steamService.steamID.isEmpty {
-                                            sourceManager.steamProfileID = steamService.steamID
-                                        }
-                                        steamPassword = ""
-                                        steamGuardCode = ""
-                                        if case .available = sourceManager.steamCredentialState {
-                                            steamLoginStatusText = "Steam 会话验证成功。会话令牌已保存到 macOS 钥匙串，密码和验证码未保存。"
-                                            showLoginForm = false
-                                        } else {
-                                            steamLoginStatusText = "账号验证成功，但本机保存状态未更新。可以先尝试下载，如仍提示需要登录，再重新保存一次。"
-                                        }
-                                        isVerifyingSteamLogin = false
-                                    }
-                                } catch let error as WorkshopError {
-                                    await MainActor.run {
-                                        switch error {
-                                        case .guardCodeRequired(let msg):
-                                            steamLoginStatusText = msg
-                                        case .timeout:
-                                            steamLoginStatusText = "连接 Steam 服务超时，请稍后重试。"
-                                        case .loginTimeout:
-                                            steamLoginStatusText = "Steam 登录超时，请检查网络或代理设置后重试。"
-                                        case .sessionExpired:
-                                            steamLoginStatusText = "Steam 会话需要重新登录。"
-                                        case .invalidCredentials:
-                                            steamLoginStatusText = "账号、密码或验证码不正确，请检查后重试。"
-                                        case .steamLoginFailed(let msg):
-                                            steamLoginStatusText = msg
-                                        case .downloadFailed(let msg):
-                                            steamLoginStatusText = msg
-                                        case .executionFailed(let msg):
-                                            steamLoginStatusText = "Steam 服务执行失败：\(msg)"
-                                        default:
-                                            steamLoginStatusText = error.localizedDescription
-                                        }
-                                        isVerifyingSteamLogin = false
-                                    }
-                                } catch {
-                                    await MainActor.run {
-                                        steamLoginStatusText = error.localizedDescription
-                                        isVerifyingSteamLogin = false
-                                    }
-                                }
-                            }
-                        }
-                        .controlSize(.small)
-                        .disabled(
-                            isWaitingForSteamGuardCode
-                            ? steamGuardCode.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                            : steamUsername.isEmpty || steamPassword.isEmpty || isVerifyingSteamLogin
-                        )
-                    }
-
-                    if !isVerifyingSteamLogin {
-                        HStack {
-                            Spacer()
-                            Button("改用二维码扫码登录") {
-                                showLoginForm = false
-                                steamLoginMethod = .qr
-                                steamLoginStatusText = nil
-                                SteamServiceManager.shared.cancelLogin()
-                                SteamServiceManager.shared.loginWithQR()
-                            }
-                            .controlSize(.small)
-                            .buttonStyle(.link)
-                        }
-                    }
-                }
-                .padding(12)
-                .background(Color.white.opacity(0.03))
-                .cornerRadius(8)
-            }
-
-            Text("扫码登录的二维码在本机生成，凭据不经过第三方。Steam 下载只保存会话令牌到 macOS 钥匙串，密码与 Guard 验证码仅用于当前登录，不会写入本地。")
-                .font(.system(size: 11))
-                .foregroundStyle(.secondary)
-                .lineLimit(3)
-        }
-    }
-
-
-
-    private var steamServiceStatusSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                Image(systemName: "network")
-                    .font(.system(size: 14))
-                    .foregroundStyle(.cyan)
-                Text(t("steamServiceStatus"))
-                    .font(.system(size: 14, weight: .semibold))
-                Spacer()
-                Button("刷新") {
-                    steamService.start()
-                }
-                .controlSize(.small)
-            }
-
-            HStack(spacing: 12) {
-                Circle()
-                    .fill(steamServiceStatusColor)
-                    .frame(width: 8, height: 8)
-
-                Text(steamServiceStatusText)
-                    .font(.system(size: 13))
-                    .foregroundStyle(.secondary)
-
-                Spacer()
-
-                Label(steamServiceStatusLabel, systemImage: steamServiceStatusIcon)
-                    .font(.system(size: 12))
-                    .foregroundStyle(steamServiceStatusColor)
-                    .lineLimit(2)
-            }
-            .padding(12)
-            .background(Color.white.opacity(0.03))
-            .cornerRadius(8)
-        }
-    }
-
-    // MARK: - Steam 二维码扫码登录（对齐 MirageWallpaper 的登录流程）
-
-    /// 二维码登录流程进行中（连接/等待扫码/等待确认）时，登录卡片需让位给二维码视图。
-    private var isSteamQRFlowActive: Bool {
-        guard steamLoginMethod == .qr else { return false }
-        switch steamService.loginState {
-        case .loggingIn, .waitingForQR, .waitingForMobileConfirmation, .waitingForCode:
-            return true
-        case .idle, .success, .failed:
-            return false
-        }
-    }
-
-    private var steamQRLoginView: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(spacing: 10) {
-                Label(credentialStateTitle, systemImage: credentialStateIcon)
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(credentialStateColor)
-                Spacer()
-            }
-
-            Text(credentialStateDescription)
-                .font(.system(size: 11))
-                .foregroundStyle(.secondary)
-
-            steamQRStateView
-
-            if let steamLoginStatusText {
-                Text(steamLoginStatusText)
-                    .font(.system(size: 11))
-                    .foregroundStyle(loginStatusColor)
-            }
-        }
-        .padding(12)
-        .background(Color.white.opacity(0.03))
-        .cornerRadius(8)
-    }
-
-    @ViewBuilder
-    private var steamQRStateView: some View {
-        switch steamService.loginState {
-        case .waitingForQR(let challenge):
-            steamQRCodeView(challenge)
-        case .loggingIn:
-            HStack(spacing: 8) {
-                ProgressView()
-                    .scaleEffect(0.8)
-                Text("正在连接 Steam，请稍候…")
-                    .font(.system(size: 11))
-                    .foregroundStyle(.secondary)
-                Spacer()
-                Button("取消登录") {
-                    SteamServiceManager.shared.cancelLogin()
-                }
-                .controlSize(.small)
-            }
-        case .waitingForMobileConfirmation:
-            HStack(spacing: 8) {
-                ProgressView()
-                    .scaleEffect(0.8)
-                Text("已扫码，请在 Steam 手机 App 上确认登录…")
-                    .font(.system(size: 11))
-                    .foregroundStyle(.secondary)
-                Spacer()
-                Button("取消登录") {
-                    SteamServiceManager.shared.cancelLogin()
-                }
-                .controlSize(.small)
-            }
-        case .waitingForCode:
-            VStack(alignment: .leading, spacing: 8) {
-                Text("Steam 要求补充验证码，请改用账号密码登录后提交。")
-                    .font(.system(size: 11))
-                    .foregroundStyle(.secondary)
-                Button("改用账户密码登录") {
-                    SteamServiceManager.shared.cancelLogin()
-                    steamLoginMethod = .password
-                    showLoginForm = true
-                }
-                .controlSize(.small)
-            }
-        case .success:
-            Label("登录成功。", systemImage: "checkmark.circle.fill")
-                .font(.system(size: 12))
-                .foregroundStyle(.green)
-        case .idle, .failed:
-            VStack(alignment: .leading, spacing: 8) {
-                Button {
-                    SteamServiceManager.shared.loginWithQR()
-                } label: {
-                    Label("使用 Steam 手机 App 扫码登录", systemImage: "qrcode")
-                        .frame(maxWidth: .infinity)
-                }
-                .controlSize(.small)
-
-                Button("改用账户密码登录") {
-                    steamLoginMethod = .password
-                    showLoginForm = true
-                    steamLoginStatusText = nil
-                }
-                .controlSize(.small)
-                .buttonStyle(.link)
-            }
-        }
-    }
-
-    private func steamQRCodeView(_ challenge: String) -> some View {
-        VStack(spacing: 10) {
-            Group {
-                if let image = Self.steamQRCodeImage(for: challenge) {
-                    Image(nsImage: image)
-                        .interpolation(.none)
-                        .resizable()
-                        .scaledToFit()
-                        .frame(width: 168, height: 168)
-                        .background(Color.white)
-                        .clipShape(RoundedRectangle(cornerRadius: 6))
-                        .id(challenge)
-                } else {
-                    Text("二维码生成失败，请点击下方刷新。")
-                        .font(.system(size: 11))
-                        .foregroundStyle(.secondary)
-                        .frame(width: 168, height: 168)
-                        .background(Color.white.opacity(0.06))
-                        .clipShape(RoundedRectangle(cornerRadius: 6))
-                }
-            }
-            .frame(maxWidth: .infinity)
-
-            Text("使用 Steam 手机 App 扫描二维码")
-                .font(.system(size: 12, weight: .medium))
-            Text("打开 Steam 手机 App 的扫码功能，扫描后按提示确认登录；二维码会自动更新。")
-                .font(.system(size: 11))
-                .foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
-
-            HStack(spacing: 10) {
-                Button {
-                    SteamServiceManager.shared.loginWithQR()
-                } label: {
-                    Label("刷新二维码", systemImage: "arrow.clockwise")
-                }
-                .controlSize(.small)
-
-                Button("取消登录") {
-                    SteamServiceManager.shared.cancelLogin()
-                }
-                .controlSize(.small)
-
-                Spacer()
-
-                Button("改用账户密码登录") {
-                    SteamServiceManager.shared.cancelLogin()
-                    steamLoginMethod = .password
-                    showLoginForm = true
-                    steamLoginStatusText = nil
-                }
-                .controlSize(.small)
-                .buttonStyle(.link)
-            }
-        }
-    }
-
-    private static func steamQRCodeImage(for value: String) -> NSImage? {
-        let filter = CIFilter.qrCodeGenerator()
-        filter.message = Data(value.utf8)
-        filter.correctionLevel = "M"
-        guard let output = filter.outputImage?.transformed(by: CGAffineTransform(scaleX: 10, y: 10)) else {
-            return nil
-        }
-        let representation = NSCIImageRep(ciImage: output)
-        let image = NSImage(size: representation.size)
-        image.addRepresentation(representation)
-        return image
-    }
-
-    private func handleSteamLoginStateChange(_ state: SteamServiceLoginState) {
-        switch state {
-        case .success:
-            let username = steamService.accountName
-            guard !username.isEmpty else { return }
-            sourceManager.setSteamIdentity(username: username)
-            if !steamService.steamID.isEmpty {
-                sourceManager.steamProfileID = steamService.steamID
-            }
-            PersistentDownloadQueueService.shared.resumeWaitingForSteamLogin()
-            isVerifyingSteamLogin = false
-            steamPassword = ""
-            steamGuardCode = ""
-            steamLoginStatusText = "登录成功。会话令牌已保存到 macOS 钥匙串，密码和验证码未保存。"
-            showLoginForm = false
-        case .failed(let message):
-            // 密码登录路径的失败信息由 verifySteamLogin 的 catch 分支负责展示。
-            guard !isVerifyingSteamLogin else { return }
-            steamLoginStatusText = message
-        default:
-            break
-        }
-    }
-
-    private var steamPasswordField: some View {
-        HStack(spacing: 6) {
-            Group {
-                if isSteamPasswordVisible {
-                    TextField(t("steamPasswordPlaceholder"), text: $steamPassword)
-                } else {
-                    SecureField(t("steamPasswordPlaceholder"), text: $steamPassword)
-                }
-            }
-            .textFieldStyle(.roundedBorder)
-
-            Button {
-                isSteamPasswordVisible.toggle()
-            } label: {
-                Image(systemName: isSteamPasswordVisible ? "eye.slash" : "eye")
-                    .font(.system(size: 12, weight: .medium))
-                    .frame(width: 18, height: 18)
-            }
-            .buttonStyle(.borderless)
-            .help(isSteamPasswordVisible ? "隐藏密码" : "显示密码")
-            .accessibilityLabel(isSteamPasswordVisible ? "隐藏 Steam 密码" : "显示 Steam 密码")
-        }
-    }
-
-    private var cleanupSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                Image(systemName: "trash.circle.fill")
-                    .font(.system(size: 14))
-                    .foregroundStyle(.orange)
-                Text("清理下载缓存")
-                    .font(.system(size: 14, weight: .semibold))
-                Spacer()
-            }
-
-            Text("删除下载失败产生的空文件夹，释放磁盘空间")
-                .font(.system(size: 12))
-                .foregroundStyle(.secondary)
-
-            HStack(spacing: 12) {
-                if let result = cleanupResult, result.count > 0 {
-                    Label("已清理 \(result.count) 个文件夹，释放 \(WorkshopService.formattedByteCount(result.bytesFreed))",
-                          systemImage: "checkmark.circle.fill")
-                        .font(.system(size: 12))
-                        .foregroundStyle(.green)
-                        .transition(.opacity)
-                } else if let result = cleanupResult, result.count == 0 {
-                    Label("没有需要清理的文件夹", systemImage: "checkmark.circle")
-                        .font(.system(size: 12))
-                        .foregroundStyle(.secondary)
-                        .transition(.opacity)
-                }
-
-                Spacer()
-
-                Button {
-                    isCleaningUp = true
-                    Task {
-                        let result = workshopService.cleanupFailedDownloads()
-                        withAnimation {
-                            cleanupResult = result
-                            isCleaningUp = false
-                        }
-                    }
-                } label: {
-                    if isCleaningUp {
-                        ProgressView()
-                            .controlSize(.small)
-                    } else {
-                        Text("清理")
-                    }
-                }
-                .controlSize(.small)
-                .disabled(isCleaningUp)
-            }
-            .padding(12)
-            .background(Color.white.opacity(0.03))
-            .cornerRadius(8)
-        }
-    }
-
-    private var isWaitingForSteamGuardCode: Bool {
-        if case .waitingForCode = steamService.loginState {
-            return true
-        }
-        return false
-    }
-
-    private var steamServiceStatusColor: Color {
-        if steamService.isAvailable {
-            return .green
-        }
-        if case .failed = steamService.loginState {
-            return .red
-        }
-        return .blue
-    }
-
-    private var steamServiceStatusText: String {
-        if steamService.isAvailable {
-            return steamService.isLoggedIn
-                ? "Steam 会话已连接，将在后续下载中复用。"
-                : "Steam 服务已就绪，登录后会自动恢复会话。"
-        }
-        if case .failed(let message) = steamService.loginState {
-            return String(format: t("steamServiceError"), message)
-        }
-        return "正在启动 Steam 服务…"
-    }
-
-    private var steamServiceStatusLabel: String {
-        if steamService.isAvailable {
-            return steamService.isLoggedIn ? "已登录" : t("steamServiceReady")
-        }
-        if case .failed = steamService.loginState {
-            return "不可用"
-        }
-        return t("downloading")
-    }
-
-    private var steamServiceStatusIcon: String {
-        if steamService.isAvailable {
-            return steamService.isLoggedIn ? "person.crop.circle.badge.checkmark" : "checkmark.circle"
-        }
-        if case .failed = steamService.loginState {
-            return "exclamationmark.triangle"
-        }
-        return "arrow.down.circle"
-    }
-
-    private var loginStatusColor: Color {
-        guard let steamLoginStatusText else { return .secondary }
-        if steamLoginStatusText.contains("成功") || steamLoginStatusText.contains("已保存") {
-            return .green
-        }
-        if steamLoginStatusText.contains("超时") || steamLoginStatusText.contains("错误") || steamLoginStatusText.contains("失败") {
-            return .orange
-        }
-        return .secondary
-    }
-
-    private var credentialStateTitle: String {
-        switch sourceManager.steamCredentialState {
-        case .unknown:
-            return "尚未加载本地账号"
-        case .missing:
-            return "未发现 Steam 会话账号"
-        case .failure:
-            return "读取本地账号失败"
-        case .available(let username):
-            return "已检测到账号 \(username)"
-        }
-    }
-
-    private var credentialStateDescription: String {
-        switch sourceManager.steamCredentialState {
-        case .unknown:
-            return "正在准备本地账号信息。"
-        case .missing:
-            return "当前没有可用于会话探测的 Steam 用户名。登录成功后只保存用户名，不保存密码。"
-        case .failure(let message):
-            return "读取本地已保存账号时发生错误：\(message)"
-        case .available:
-            return "本机已记录 Steam 账号。启动时会从 macOS 钥匙串恢复会话。"
-        }
-    }
-
-    private var credentialStateIcon: String {
-        switch sourceManager.steamCredentialState {
-        case .unknown: return "questionmark.circle"
-        case .missing: return "person.crop.circle.badge.exclamationmark"
-        case .failure: return "exclamationmark.triangle"
-        case .available: return "checkmark.circle"
-        }
-    }
-
-    private var credentialStateColor: Color {
-        switch sourceManager.steamCredentialState {
-        case .available: return .green
-        case .unknown: return .secondary
-        case .missing: return .orange
-        case .failure: return .red
-        }
-    }
-
-    private func syncCredentialPresentation() {
-        if case .available(let username) = sourceManager.steamCredentialState {
-            steamUsername = username
-            steamPassword = ""
-            steamGuardCode = ""
-            if !isVerifyingSteamLogin {
-                showLoginForm = false
-            }
-        } else if !isVerifyingSteamLogin {
-            // 与 Mirage 一致：未登录时默认展示二维码扫码入口。
-            showLoginForm = false
-            steamLoginMethod = .qr
-        }
-    }
-}
 
 // MARK: - 目录迁移 Sheet
 private struct DirectoryMigrationSheet: View {
