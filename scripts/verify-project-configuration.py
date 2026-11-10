@@ -60,6 +60,11 @@ if args.app:
     for bundle, executable in ((app, 'WaifuX'), (helper, 'WaifuXHelper')):
         info = plistlib.loads((bundle / 'Contents/Info.plist').read_bytes())
         assert not any(k.endswith('UsageDescription') or 'ScreenCapture' in k for k in info), bundle
+        if args.signed:
+            encoded = subprocess.check_output(['codesign', '-d', '--entitlements', ':-', str(bundle)], stderr=subprocess.DEVNULL)
+            signed_permissions = plistlib.loads(encoded)
+            assert all(signed_permissions.get(key) == value for key, value in permissions.items()), (bundle, 'retained entitlements')
+            assert set(signed_permissions) <= set(permissions) | {'com.apple.application-identifier', 'com.apple.developer.team-identifier'}, (bundle, 'unexpected entitlement')
         if args.architectures:
             archs = subprocess.check_output(['lipo', '-archs', str(bundle / ('Contents/MacOS/' + executable))], text=True).split()
             assert set(archs) == set(args.architectures), (bundle, archs)

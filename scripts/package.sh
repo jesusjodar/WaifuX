@@ -36,18 +36,25 @@ sign_bundle() {
     codesign --force --sign "$identity" --timestamp --options runtime "$@"
   fi
 }
+helper_entitlements="$repo_root/BackgroundAgent/BackgroundAgent.entitlements"
 if [[ "$identity" != '-' ]]; then
   : "${WAIFUX_HELPER_PROFILE:?Developer ID distribution requires the helper provisioning profile}"
   cp "$WAIFUX_HELPER_PROFILE" "$app/Contents/Helpers/WaifuXHelper.app/Contents/embedded.provisionprofile"
+  helper_entitlements="$package_work/helper-distribution.entitlements"
+  python3 "$repo_root/scripts/verify-helper-provisioning.py" --app "$app/Contents/Helpers/WaifuXHelper.app" \
+    --prepare-entitlements "$repo_root/BackgroundAgent/BackgroundAgent.entitlements" --output-entitlements "$helper_entitlements"
 fi
 # Sparkle contains nested updater apps and XPC services. Sign inside-out before
 # signing the helper and host with their minimal retained entitlements.
 while IFS= read -r -d '' bundle; do
   sign_bundle --deep "$bundle"
 done < <(find "$app/Contents/Frameworks" -maxdepth 1 -name '*.framework' -print0)
-sign_bundle --entitlements "$repo_root/BackgroundAgent/BackgroundAgent.entitlements" "$app/Contents/Helpers/WaifuXHelper.app"
+sign_bundle --entitlements "$helper_entitlements" "$app/Contents/Helpers/WaifuXHelper.app"
 sign_bundle --entitlements "$repo_root/WaifuX.entitlements" "$app"
 python3 "$repo_root/scripts/verify-project-configuration.py" --app "$app" --signed --architectures $build_archs
+if [[ "$identity" != '-' ]]; then
+  python3 "$repo_root/scripts/verify-helper-provisioning.py" --app "$app/Contents/Helpers/WaifuXHelper.app"
+fi
 ln -s /Applications "$package_work/image/Applications"
 version="$(tr -d '[:space:]' < "$repo_root/VERSION")"
 artifact="WaifuX-Wallhaven-$version-$pkg_arch"
