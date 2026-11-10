@@ -10,4 +10,4 @@ swiftc -parse-as-library \
   "$repo_root/Utilities/LegacyRecordReader.swift" \
   "$repo_root/Tests/WallhavenStaticCoreTests.swift" \
   -o "$test_dir/static-core-tests"
-"$test_dir/static-core-tests"
+"$test_dir/static-core-tests" "$@"

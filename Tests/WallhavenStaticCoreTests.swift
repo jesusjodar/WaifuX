@@ -3,6 +3,18 @@ import Foundation
 @main
 enum WallhavenStaticCoreTests {
     static func main() throws {
+        if CommandLine.arguments.count > 1 {
+            let data = try Data(contentsOf: URL(fileURLWithPath: CommandLine.arguments[1]))
+            let response = try JSONSerialization.jsonObject(with: data) as! [String: Any]
+            let wallpapers = response["data"] as! [[String: Any]]
+            precondition(!wallpapers.isEmpty)
+            for record in wallpapers {
+                precondition(WallhavenContentPolicy.isWallpaperRecord(id: record["id"] as! String, detailURL: record["url"] as! String, imagePath: record["path"] as! String))
+                let thumbs = record["thumbs"] as! [String: String]
+                precondition(thumbs.values.allSatisfy { WallhavenContentPolicy.imageURL($0) != nil })
+            }
+            print("PASS: \(wallpapers.count) live API records and thumbnail URLs satisfy Wallhaven policy")
+        }
         enum Kind: String, Decodable { case wallpaper }
         struct Record: Decodable {
             let id: String

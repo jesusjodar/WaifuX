@@ -5,13 +5,11 @@ import Foundation
 enum LibraryItem: Identifiable, Hashable {
     case folder(LibraryFolder)
     case wallpaper(Wallpaper, downloadDate: Date?)
-    case media(MediaItem, localFileURL: URL?)
 
     var id: String {
         switch self {
         case .folder(let folder): return "folder_\(folder.id)"
         case .wallpaper(let wallpaper, _): return wallpaper.id
-        case .media(let media, _): return media.id
         }
     }
 
@@ -30,8 +28,4 @@ enum LibraryItem: Identifiable, Hashable {
         return nil
     }
 
-    var mediaItem: MediaItem? {
-        if case .media(let m, _) = self { return m }
-        return nil
-    }
 }

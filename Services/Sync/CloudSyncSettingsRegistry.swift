@@ -2,24 +2,12 @@ import Foundation
 
 // MARK: - 设置分类
 enum CloudSyncSettingsCategory: String, Codable, CaseIterable {
-    case general       // 主题、下载、代理、模块开关等
-    case playback      // 自动暂停、HDR、音量等
-    case wallpaperEngine // 超分、FPS、烘焙、实时渲染等
-    case appearance    // Arc 背景、颗粒、刘海等
-    case clock         // Liquid Glass 时钟
-    case sources       // 数据源、壁纸源、规则仓库
-    case player        // 弹幕、播放器增强
-    case localization  // 语言
-
+    case general, appearance, sources, localization
     var displayName: String {
         switch self {
         case .general: return t("general")
-        case .playback: return t("player.play")
-        case .wallpaperEngine: return t("tutorial.we.title")
         case .appearance: return t("player.appearance")
-        case .clock: return t("时钟")
-        case .sources: return t("数据源")
-        case .player: return t("播放器")
+        case .sources: return "Wallhaven"
         case .localization: return t("design.language")
         }
     }
@@ -44,114 +32,20 @@ struct CloudSyncSettingsEntry {
 enum CloudSyncSettingsRegistry {
     /// 完整的同步白名单
     static var allEntries: [CloudSyncSettingsEntry] {
-        generalEntries + playbackEntries + wallpaperEngineEntries
-            + appearanceEntries + clockEntries + sourcesEntries
-            + playerEntries + localizationEntries
-    }
-
-    // MARK: - 通用设置
-    private static var generalEntries: [CloudSyncSettingsEntry] {
         [
             .init(key: "theme_mode", category: .general, valueType: .string),
             .init(key: "save_to_downloads", category: .general, valueType: .bool),
             .init(key: "launch_at_login", category: .general, valueType: .bool),
-            .init(key: "prevent_system_sleep", category: .general, valueType: .bool),
             .init(key: "proxy_enabled", category: .general, valueType: .bool),
             .init(key: "proxy_host", category: .general, valueType: .string),
             .init(key: "proxy_port", category: .general, valueType: .string),
-            .init(key: "module_wallpaper_enabled", category: .general, valueType: .bool),
-            .init(key: "module_media_enabled", category: .general, valueType: .bool),
-            .init(key: "module_anime_enabled", category: .general, valueType: .bool),
-            .init(key: "show_all_workshop_content", category: .general, valueType: .bool),
-            .init(key: "dynamic_lock_screen_enabled", category: .general, valueType: .bool),
-            .init(key: "system_wallpaper_sync_enabled", category: .general, valueType: .bool),
-        ]
-    }
-
-    // MARK: - 播放设置
-    private static var playbackEntries: [CloudSyncSettingsEntry] {
-        [
-            .init(key: "pause_when_other_app_foreground", category: .playback, valueType: .bool),
-            .init(key: "pause_when_fullscreen_covers", category: .playback, valueType: .bool),
-            .init(key: "pause_on_battery_power", category: .playback, valueType: .bool),
-            .init(key: "pause_when_window_coverage", category: .playback, valueType: .bool),
-            .init(key: "window_coverage_pause_threshold", category: .playback, valueType: .double),
-            .init(key: "hdr_enabled", category: .playback, valueType: .bool),
-        ]
-    }
-
-    // MARK: - 壁纸引擎设置
-    private static var wallpaperEngineEntries: [CloudSyncSettingsEntry] {
-        [
-            .init(key: "scene_realtime_rendering_enabled", category: .wallpaperEngine, valueType: .bool),
-            .init(key: "upscaling_enabled", category: .wallpaperEngine, valueType: .bool),
-            .init(key: "upscaling_percent", category: .wallpaperEngine, valueType: .double),
-            .init(key: "effect_reduction_enabled", category: .wallpaperEngine, valueType: .bool),
-            .init(key: "wallpaper_engine_fps", category: .wallpaperEngine, valueType: .double),
-            .init(key: "wallpaper_engine_perf_mode", category: .wallpaperEngine, valueType: .string),
-            .init(key: "web_wallpaper_render_scale_percent", category: .wallpaperEngine, valueType: .double),
-            .init(key: "scene_bake_fps", category: .wallpaperEngine, valueType: .double),
-            .init(key: "scene_bake_duration", category: .wallpaperEngine, valueType: .double),
-            .init(key: "auto_bake_scene", category: .wallpaperEngine, valueType: .bool),
-            .init(key: WorkshopSubscriptionAutomation.defaultsKey, category: .wallpaperEngine, valueType: .bool),
-        ]
-    }
-
-    // MARK: - 外观设置（避免与 general 重叠）
-    private static var appearanceEntries: [CloudSyncSettingsEntry] {
-        [
             .init(key: "arc_theme_mode", category: .appearance, valueType: .string),
             .init(key: "arc_accent_color", category: .appearance, valueType: .string),
-            .init(key: "arc_frosted_intensity", category: .appearance, valueType: .double),
-            .init(key: "grain_texture_enabled", category: .appearance, valueType: .bool),
-            .init(key: "grain_texture_quality", category: .appearance, valueType: .string),
-            .init(key: "arc_grain_intensity", category: .appearance, valueType: .double),
-            .init(key: "arc_dot_grid_opacity", category: .appearance, valueType: .double),
-            .init(key: "arc_use_noise", category: .appearance, valueType: .bool),
             .init(key: "arc_compact_mode", category: .appearance, valueType: .bool),
-            .init(key: "hide_notch", category: .appearance, valueType: .bool),
-            .init(key: "explore_grain_wallpaper", category: .appearance, valueType: .double),
-            .init(key: "explore_grain_anime", category: .appearance, valueType: .double),
-            .init(key: "explore_grain_media", category: .appearance, valueType: .double),
-        ]
-    }
-
-    // MARK: - 时钟设置
-    private static var clockEntries: [CloudSyncSettingsEntry] {
-        [
-            .init(key: "liquid_glass_clock_config_v2", category: .clock, valueType: .data),
-        ]
-    }
-
-    // MARK: - 数据源设置
-    private static var sourcesEntries: [CloudSyncSettingsEntry] {
-        [
-            .init(key: "wallpaper_selected_source", category: .sources, valueType: .string),
-            .init(key: "workshop_selected_source", category: .sources, valueType: .string),
-            .init(key: "workshop_steam_profile_id", category: .sources, valueType: .string),
-            .init(key: "rule_repository_url", category: .sources, valueType: .string),
-            .init(key: "data_source_profiles_v1", category: .sources, valueType: .data),
-            .init(key: "data_source_active_profile_id_v1", category: .sources, valueType: .string),
+            .init(key: "portrait_blur_fill_enabled", category: .sources, valueType: .bool),
             .init(key: WallhavenBrowsePreferences.hidePortraitByDefaultKey, category: .sources, valueType: .bool),
             .init(key: WallhavenBrowsePreferences.hidePeopleByDefaultKey, category: .sources, valueType: .bool),
-        ]
-    }
-
-    // MARK: - 播放器增强设置
-    private static var playerEntries: [CloudSyncSettingsEntry] {
-        [
-            .init(key: "danmaku_enabled", category: .player, valueType: .bool),
-            .init(key: "danmaku_opacity", category: .player, valueType: .double),
-            .init(key: "danmaku_speed", category: .player, valueType: .double),
-            .init(key: "danmaku_font_size", category: .player, valueType: .double),
-            .init(key: "player_enhancement_enabled", category: .player, valueType: .bool),
-        ]
-    }
-
-    // MARK: - 语言设置
-    private static var localizationEntries: [CloudSyncSettingsEntry] {
-        [
-            .init(key: "app_language", category: .localization, valueType: .string),
+            .init(key: "app_language", category: .localization, valueType: .string)
         ]
     }
 

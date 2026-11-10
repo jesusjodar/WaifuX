@@ -1,6 +1,6 @@
 import Foundation
 
-/// 库文件夹（支持壁纸和媒体两种内容类型）
+/// Folders for downloaded and favorite Wallhaven images.
 struct LibraryFolder: Identifiable, Codable, Hashable {
     let id: String
     var name: String
@@ -33,7 +33,6 @@ struct LibraryFolder: Identifiable, Codable, Hashable {
 
     enum FolderContentType: String, Codable, Hashable {
         case wallpaper
-        case media
     }
 
     enum FolderCollection: String, Codable, Hashable {

@@ -85,6 +85,22 @@ final class CachePersistenceService {
     }
 
     /// 删除单条记录
+    /// Preserve the original array bytes before tolerant migration can rewrite
+    /// its index. A failed backup leaves the original data untouched.
+    func loadLegacyRecords<Record: Decodable>(_ type: Record.Type, key: String) -> [Record]? {
+        do {
+            let data = try storage.object(forKey: key)
+            let records = try LegacyRecordReader.read(type, from: data).records
+            let backupKey = "wallhaven-static-backups/\(key)"
+            if !(try storage.existsObject(forKey: backupKey)) {
+                try storage.setObject(data, forKey: backupKey)
+            }
+            return records
+        } catch {
+            return nil
+        }
+    }
+
     @discardableResult
     func delete(key: String) -> Bool {
         do {

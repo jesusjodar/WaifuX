@@ -80,34 +80,10 @@ class WallpaperViewModel: ObservableObject {
     @Published var selectedRatios: [String] = []
     @Published var selectedColors: [String] = []
     @Published var atleastResolution: String? = nil  // 最小分辨率，如 "3840x2160"
-    @Published var selected4KCategorySlug: String? = nil  // 4K 源的分类 slug（如 "anime", "nature"）
-    @Published var selected4KSorting: FourKSortingOption = .latest {  // 4K 源的排序方式
-        didSet {
-            persistExploreSortIfNeeded(selected4KSorting.rawValue, key: Self.fourKSortingDefaultsKey, changed: selected4KSorting != oldValue)
-        }
-    }
-    @Published var selectedKonachanSorting: KonachanSorting = .dateAdded {  // Konachan 源的排序方式
-        didSet {
-            persistExploreSortIfNeeded(selectedKonachanSorting.rawValue, key: Self.konachanSortingDefaultsKey, changed: selectedKonachanSorting != oldValue)
-        }
-    }
-    @Published var selectedPixivRankingMode: PixivRankingMode = .weekly {  // Pixiv 源的排行模式（默认周榜）
-        didSet {
-            persistExploreSortIfNeeded(selectedPixivRankingMode.rawValue, key: Self.pixivRankingModeDefaultsKey, changed: selectedPixivRankingMode != oldValue)
-        }
-    }
-    @Published var selectedPixivWorkType: PixivWorkType = .all  // Pixiv 作品类型筛选
-    @Published var selectedPixivSearchSort: PixivSearchSort = .dateD  // Pixiv 搜索排序
-    @Published var pixivHideAI: Bool = false  // Pixiv 屏蔽 AI 作品
-    @Published var pixivRelatedTags: [String] = []  // Pixiv 搜索相关标签
-
     // MARK: - Explore 排序持久化
     // ⚠️ 不在 init 读 UserDefaults（macOS 26+ _CFXPreferences 栈溢出风险），由 restoreExploreSortPreferences() 延迟恢复
     private static let sortingOptionDefaultsKey = "explore.wallpaper.sortingOption"
     private static let topRangeDefaultsKey = "explore.wallpaper.topRange"
-    private static let fourKSortingDefaultsKey = "explore.wallpaper.fourKSorting"
-    private static let konachanSortingDefaultsKey = "explore.wallpaper.konachanSorting"
-    private static let pixivRankingModeDefaultsKey = "explore.wallpaper.pixivRankingMode"
     private static let homeWallhavenRatios = ["16x9", "16x10", "21x9", "32x9", "48x9"]
     private var isRestoringExploreSort = false
     private var hasRestoredExploreSort = false
@@ -134,18 +110,6 @@ class WallpaperViewModel: ObservableObject {
            let range = TopRange(rawValue: raw) {
             topRange = range
         }
-        if let raw = defaults.string(forKey: Self.fourKSortingDefaultsKey),
-           let option = FourKSortingOption(rawValue: raw) {
-            selected4KSorting = option
-        }
-        if let raw = defaults.string(forKey: Self.konachanSortingDefaultsKey),
-           let option = KonachanSorting(rawValue: raw) {
-            selectedKonachanSorting = option
-        }
-        if let raw = defaults.string(forKey: Self.pixivRankingModeDefaultsKey),
-           let mode = PixivRankingMode(rawValue: raw) {
-            selectedPixivRankingMode = mode
-        }
     }
 
     // MARK: - 本地收藏与下载记录
@@ -161,13 +125,6 @@ class WallpaperViewModel: ObservableObject {
     private let schedulerService = WallpaperSchedulerService.shared
 
     private let networkService = NetworkService.shared
-    private let sourceManager = WallpaperSourceManager.shared
-
-    /// 壁纸源切换消息（供 UI 层显示 Toast）
-    var sourceSwitchMessage: String? {
-        sourceManager.lastSwitchMessage
-    }
-
     // API Key - 使用 Keychain 安全存储（优化：内存缓存 + 异步访问）
     private let apiKeyService = "com.waifux.wallhaven.apikey"
     private let apiKeyAccount = "wallhaven_api_key"
@@ -628,127 +585,15 @@ class WallpaperViewModel: ObservableObject {
     /// - 短链 `https://whvn.cc/{id}`（详情页「复制链接」常见格式，会 301 到 wallhaven.cc/w/{id}）
     /// - 裸 ID（如 `po71m9`）
     static func extractWallhavenID(from urlString: String) -> String? {
-        let trimmed = urlString.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return nil }
-
-        // 裸 ID：Wallhaven 壁纸 ID 为 5–7 位字母数字（常见 6 位）
-        if Self.isWallhavenWallpaperID(trimmed) {
-            return trimmed
-        }
-
-        guard let url = URL(string: trimmed), let host = url.host?.lowercased() else { return nil }
-        let pathComponents = url.pathComponents.filter { $0 != "/" }
-
-        // 短链：whvn.cc/{id}（也可能是 whvn.cc/w/{id}）
-        if host == "whvn.cc" || host.hasSuffix(".whvn.cc") {
-            if pathComponents.count == 1, Self.isWallhavenWallpaperID(pathComponents[0]) {
-                return pathComponents[0]
-            }
-            if let idIndex = pathComponents.firstIndex(where: { $0 == "w" || $0 == "wallpaper" }),
-               idIndex + 1 < pathComponents.count,
-               Self.isWallhavenWallpaperID(pathComponents[idIndex + 1]) {
-                return pathComponents[idIndex + 1]
-            }
-            return nil
-        }
-
-        // 正式站：wallhaven.cc/w/{id} 或 /wallpaper/{id}
-        guard host.contains("wallhaven") else { return nil }
-        if let idIndex = pathComponents.firstIndex(where: { $0 == "w" || $0 == "wallpaper" }),
-           idIndex + 1 < pathComponents.count,
-           Self.isWallhavenWallpaperID(pathComponents[idIndex + 1]) {
-            return pathComponents[idIndex + 1]
-        }
-        return nil
+        let value = urlString.trimmingCharacters(in: .whitespacesAndNewlines)
+        if WallhavenContentPolicy.isWallpaperID(value) { return value }
+        guard let url = URL(string: value) else { return nil }
+        return WallhavenContentPolicy.wallpaperID(from: url)
     }
 
-    /// Wallhaven 壁纸 ID：仅字母数字，长度 5–7（官方短链 /w/ 与 whvn.cc 一致）。
-    private static func isWallhavenWallpaperID(_ value: String) -> Bool {
-        let id = value.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
-        guard (5...7).contains(id.count) else { return false }
-        return id.unicodeScalars.allSatisfy { CharacterSet.alphanumerics.contains($0) }
-    }
-
-    /// 提取 4KWallpapers 详情页 URL（4kwallpapers.com/.../{name}-{id}.html）
-    static func extract4KWallpapersDetailURL(from urlString: String) -> URL? {
-        let trimmed = urlString.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard let url = URL(string: trimmed),
-              let host = url.host?.lowercased(),
-              host.contains("4kwallpapers.com") else { return nil }
-        let path = url.path.lowercased()
-        guard path.hasSuffix(".html"), path.contains("-") else { return nil }
-        return url
-    }
-
-    /// 提取 Konachan post ID（konachan.com|net/post/show/{id}）
-    static func extractKonachanID(from urlString: String) -> String? {
-        let trimmed = urlString.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard let url = URL(string: trimmed),
-              let host = url.host?.lowercased(),
-              host.contains("konachan") else { return nil }
-        let components = url.pathComponents
-        // /post/show/{id}
-        if let showIndex = components.firstIndex(of: "show"),
-           showIndex + 1 < components.count {
-            let id = components[showIndex + 1]
-            if id.allSatisfy(\.isNumber) { return id }
-        }
-        // 兜底：路径末段为纯数字
-        if let last = components.last, last.allSatisfy(\.isNumber) {
-            return last
-        }
-        return nil
-    }
-
-    /// 提取 Pixiv 作品 ID（pixiv.net/artworks/{id} 或 /i/{id}）
-    static func extractPixivID(from urlString: String) -> String? {
-        let trimmed = urlString.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard let url = URL(string: trimmed),
-              let host = url.host?.lowercased(),
-              host.contains("pixiv.net") else { return nil }
-        let components = url.pathComponents
-        if let artworksIndex = components.firstIndex(of: "artworks"),
-           artworksIndex + 1 < components.count {
-            let id = components[artworksIndex + 1]
-            if id.allSatisfy(\.isNumber) { return id }
-        }
-        // 旧式 /i/{id}
-        if let iIndex = components.firstIndex(of: "i"),
-           iIndex + 1 < components.count {
-            let id = components[iIndex + 1]
-            if id.allSatisfy(\.isNumber) { return id }
-        }
-        // 查询参数 illust_id=
-        if let comps = URLComponents(url: url, resolvingAgainstBaseURL: false),
-           let illustID = comps.queryItems?.first(where: { $0.name == "illust_id" })?.value,
-           illustID.allSatisfy(\.isNumber) {
-            return illustID
-        }
-        return nil
-    }
-
-    /// 通过链接解析壁纸，支持 Wallhaven / 4KWallpapers / Konachan / Pixiv
-    func resolveWallpaperByURL(_ urlString: String) async throws -> Wallpaper {
-        let trimmed = urlString.trimmingCharacters(in: .whitespacesAndNewlines)
-
-        if let wallpaperID = Self.extractWallhavenID(from: trimmed) {
-            return try await resolveWallhavenWallpaperByID(wallpaperID)
-        }
-        if let detailURL = Self.extract4KWallpapersDetailURL(from: trimmed) {
-            return try await resolve4KWallpaperByDetailURL(detailURL)
-        }
-        if let konachanID = Self.extractKonachanID(from: trimmed) {
-            return try await resolveKonachanWallpaperByID(konachanID)
-        }
-        if let pixivID = Self.extractPixivID(from: trimmed) {
-            return try await resolvePixivWallpaperByID(pixivID)
-        }
-
-        throw NSError(
-            domain: "WaifuX",
-            code: -1,
-            userInfo: [NSLocalizedDescriptionKey: t("无法解析此链接，仅支持 Wallhaven / 4KWallpapers / Konachan / Pixiv 详情页链接")]
-        )
+    func resolveWallpaperByURL(_ value: String) async throws -> Wallpaper {
+        guard let id = Self.extractWallhavenID(from: value) else { throw NetworkError.invalidResponse }
+        return try await resolveWallhavenWallpaperByID(id)
     }
 
     /// 通过 Wallhaven API 按 ID 获取壁纸详情
@@ -764,110 +609,7 @@ class WallpaperViewModel: ObservableObject {
         return response.data
     }
 
-    /// 通过 4KWallpapers 详情页 URL 构造可打开的 Wallpaper
-    private func resolve4KWallpaperByDetailURL(_ detailURL: URL) async throws -> Wallpaper {
-        // 先用详情页 URL 构造最小可用模型，再尝试解析原图
-        let fileName = detailURL.deletingPathExtension().lastPathComponent
-        let idPart = fileName.split(separator: "-").last.map(String.init) ?? fileName
-        var wallpaper = Wallpaper(
-            id: "4k_\(idPart)",
-            title: nil,
-            url: detailURL.absoluteString,
-            shortUrl: nil,
-            views: 0,
-            favorites: 0,
-            downloads: nil,
-            source: "4kwallpapers",
-            purity: "sfw",
-            category: "general",
-            dimensionX: 3840,
-            dimensionY: 2160,
-            resolution: "3840x2160",
-            ratio: "1.78",
-            fileSize: nil,
-            fileType: "image/jpeg",
-            createdAt: nil,
-            colors: [],
-            path: detailURL.absoluteString,
-            thumbs: Wallpaper.Thumbs(
-                large: detailURL.absoluteString,
-                original: detailURL.absoluteString,
-                small: detailURL.absoluteString
-            ),
-            tags: nil,
-            uploader: nil
-        )
-
-        if let originalURL = await FourKWallpapersService.shared.fetchOriginalImageURL(for: wallpaper),
-           !originalURL.isEmpty {
-            wallpaper = Wallpaper(
-                id: wallpaper.id,
-                title: wallpaper.title,
-                url: wallpaper.url,
-                shortUrl: wallpaper.shortUrl,
-                views: wallpaper.views,
-                favorites: wallpaper.favorites,
-                downloads: wallpaper.downloads,
-                source: wallpaper.source,
-                purity: wallpaper.purity,
-                category: wallpaper.category,
-                dimensionX: wallpaper.dimensionX,
-                dimensionY: wallpaper.dimensionY,
-                resolution: wallpaper.resolution,
-                ratio: wallpaper.ratio,
-                fileSize: wallpaper.fileSize,
-                fileType: wallpaper.fileType,
-                createdAt: wallpaper.createdAt,
-                colors: wallpaper.colors,
-                path: originalURL,
-                thumbs: Wallpaper.Thumbs(
-                    large: originalURL,
-                    original: originalURL,
-                    small: originalURL
-                ),
-                tags: wallpaper.tags,
-                uploader: wallpaper.uploader
-            )
-        }
-        return wallpaper
-    }
-
-    /// 通过 Konachan post ID 获取壁纸
-    private func resolveKonachanWallpaperByID(_ id: String) async throws -> Wallpaper {
-        // .all 不附加 rating 标签，并让服务从包含 explicit 帖子的 .com 查询。
-        let response = try await KonachanService.shared.search(
-            query: "id:\(id)",
-            page: 1,
-            perPage: 1,
-            purity: .all,
-            sorting: .dateAdded
-        )
-        if let wallpaper = response.data.first {
-            return wallpaper
-        }
-        throw NSError(
-            domain: "WaifuX",
-            code: -1,
-            userInfo: [NSLocalizedDescriptionKey: String(format: t("未找到 Konachan 壁纸（id=%@）"), String(describing: id))]
-        )
-    }
-
-    /// 通过 Pixiv 作品 ID 获取壁纸
-    private func resolvePixivWallpaperByID(_ id: String) async throws -> Wallpaper {
-        let detail = try await PixivService.shared.illustDetail(id: id)
-        return detail.toWallpaper()
-    }
-
-    /// 对外公开的壁纸详情获取接口（供 WallpaperDetailSheet 调用以补充 uploader 数据）
-    /// - Parameter id: Wallhaven 壁纸 ID
-    /// - Returns: 壁纸详情数据（含 uploader）
     func fetchWallpaperDetail(byID id: String) async throws -> Wallpaper {
-        // ⚠️ 非 Wallhaven 源的 id（`4k_27628` / `pixiv_…` / Konachan）不能拿去查 Wallhaven 详情接口，
-        // 之前会稳定 404 并在日志里刷「获取壁纸详情失败（不影响浏览）」。
-        // 这些源本来就没有对应的详情接口，直接返回占位，由调用方保留搜索结果字段。
-        if id.hasPrefix("4k_") || id.hasPrefix("pixiv_") || id.hasPrefix("konachan_") || id.hasPrefix("local_") {
-            throw NetworkError.invalidResponse
-        }
         return try await resolveWallhavenWallpaperByID(id)
     }
 
@@ -944,14 +686,13 @@ class WallpaperViewModel: ObservableObject {
         // 混有英文词的查询（如「碧蓝航线 azur lane」）仍正常走网络。
         let trimmedQuery = searchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
         if !trimmedQuery.isEmpty,
-           trimmedQuery.isCJKOnlyQuery,
-           !sourceManager.activeSource.supportsChineseSearch {
+           trimmedQuery.isCJKOnlyQuery {
             wallpapers = []
             hasMorePages = false
             errorKind = .chineseUnsupported
             errorMessage = String(
                 format: t("source.chineseSearchUnsupported"),
-                sourceManager.activeSource.displayName
+                "Wallhaven"
             )
             isLoading = false
             return
@@ -1070,49 +811,6 @@ class WallpaperViewModel: ObservableObject {
         return AuthorPageResult(items: response.data, hasMore: hasMore)
     }
 
-    /// Pixiv 作者作品 ID 列表缓存，避免每页重复请求 profile/all。
-    private var pixivAuthorIllustIDCache: [String: [String]] = [:]
-
-    /// 获取指定 Pixiv 作者的插画作品。Pixiv 先返回用户的全部插画 ID，再批量补齐当前页的作品信息。
-    func fetchPixivWallpapersByAuthor(userID: String, page: Int = 1, limit: Int = 24) async throws -> AuthorPageResult {
-        let trimmedUserID = userID.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmedUserID.isEmpty, page > 0, limit > 0 else {
-            return AuthorPageResult(items: [], hasMore: false)
-        }
-
-        // Pixiv /profile/illusts 单次最多 24 个 ids[]
-        let pageLimit = min(limit, 24)
-
-        let orderedIDs: [String]
-        if let cached = pixivAuthorIllustIDCache[trimmedUserID] {
-            orderedIDs = cached
-        } else {
-            let profile = try await PixivService.shared.userAllIllusts(userId: trimmedUserID)
-            // 漫画由 MangaDetailSheet 的独立路由处理，不能在当前壁纸详情面板内原地切换。
-            let artworkIDs = Array((profile.illusts ?? [:]).keys)
-            orderedIDs = Array(Set(artworkIDs)).sorted {
-                (Int64($0) ?? 0) > (Int64($1) ?? 0)
-            }
-            pixivAuthorIllustIDCache[trimmedUserID] = orderedIDs
-        }
-
-        let startIndex = (page - 1) * pageLimit
-        guard startIndex < orderedIDs.count else {
-            return AuthorPageResult(items: [], hasMore: false)
-        }
-
-        let endIndex = min(startIndex + pageLimit, orderedIDs.count)
-        let pageIDs = Array(orderedIDs[startIndex..<endIndex])
-        // hasMore 按 ID 切片判断，不依赖转换后数量（部分 ID 可能解析失败）
-        let hasMore = endIndex < orderedIDs.count
-
-        let works = try await PixivService.shared.userIllusts(userId: trimmedUserID, illustIDs: pageIDs)
-        let worksByID = Dictionary(uniqueKeysWithValues: works.map { ($0.id, $0) })
-        let items = pageIDs.compactMap { worksByID[$0]?.toWallpaper() }
-        return AuthorPageResult(items: items, hasMore: hasMore)
-    }
-
-    // MARK: - 加载更多（支持 Task Cancellation + 预加载）
     func loadMore() async {
         guard !isLoading, hasMorePages else { return }
         isLoading = true
@@ -1312,20 +1010,7 @@ class WallpaperViewModel: ObservableObject {
     private let maxWallhavenRetries = 0
 
     private func fetchWallpapers(parameters: WallhavenAPI.SearchParameters) async throws -> WallpaperSearchResponse {
-        let sourceManager = WallpaperSourceManager.shared
-
-        // 根据当前活跃源决定从哪个数据源获取
-        // ⚠️ 运行时不做任何自动切换；数据源只由用户手动切换（WallpaperSourceManager.switchTo）决定
-        switch sourceManager.activeSource {
-        case .wallhaven:
-            return try await fetchFromWallhaven(parameters: parameters)
-        case .fourKWallpapers:
-            return try await fetchFromFourKWallpapers(parameters: parameters)
-        case .konachan:
-            return try await fetchFromKonachan(parameters: parameters)
-        case .pixiv:
-            return try await fetchFromPixiv(parameters: parameters)
-        }
+        try await fetchFromWallhaven(parameters: parameters)
     }
 
     private func fetchFromWallhaven(parameters: WallhavenAPI.SearchParameters) async throws -> WallpaperSearchResponse {
@@ -1348,176 +1033,6 @@ class WallpaperViewModel: ObservableObject {
         }
     }
 
-    /// 从 PixelVault（4KWallpapers）源获取数据（仅当用户手动选择了该源时才会调用）
-    private func fetchFromFourKWallpapers(parameters: WallhavenAPI.SearchParameters) async throws -> WallpaperSearchResponse {
-        // 4K 分类映射：优先使用用户在探索页选择的 4K 分类，否则尝试从 WallHaven 分类推断
-        let categorySlug: String?
-        if let selected4K = selected4KCategorySlug {
-            categorySlug = selected4K
-        } else if !parameters.categories.isEmpty && parameters.categories != "111" {
-            // 从 WallHaven 分类掩码推断
-            // "100" = general, "010" = anime, "001" = people
-            if parameters.categories == "010" {
-                categorySlug = "anime"
-            } else if parameters.categories == "001" {
-                categorySlug = "people"
-            } else {
-                categorySlug = nil
-            }
-        } else {
-            categorySlug = nil
-        }
-
-        // 决定使用 Popular 还是 Latest URL
-        let usePopular: Bool
-        switch selected4KSorting {
-        case .popular:
-            usePopular = true
-        case .latest:
-            usePopular = false
-        }
-
-        return try await FourKWallpapersService.shared.search(
-            query: parameters.query,
-            page: parameters.page,
-            perPage: parameters.perPage,
-            category: categorySlug,
-            purity: "sfw",
-            usePopular: usePopular
-        )
-    }
-
-    /// 从 Konachan 源获取数据
-    private func fetchFromKonachan(parameters: WallhavenAPI.SearchParameters) async throws -> WallpaperSearchResponse {
-        // 映射 purity: Wallhaven 位掩码 → KonachanPuritySelection
-        var puritySelection: KonachanPuritySelection = []
-        if parameters.purity.first == "1" { puritySelection.insert(.safe) }
-        if parameters.purity.count > 1 && parameters.purity[parameters.purity.index(parameters.purity.startIndex, offsetBy: 1)] == "1" { puritySelection.insert(.questionable) }
-        if parameters.purity.count > 2 && parameters.purity[parameters.purity.index(parameters.purity.startIndex, offsetBy: 2)] == "1" { puritySelection.insert(.explicit) }
-
-        if puritySelection.isEmpty {
-            puritySelection = .safeOnly
-        }
-
-        return try await KonachanService.shared.search(
-            query: parameters.query,
-            page: parameters.page,
-            perPage: parameters.perPage,
-            purity: puritySelection,
-            sorting: selectedKonachanSorting
-        )
-    }
-
-    /// 从 Pixiv 源获取数据
-    private func fetchFromPixiv(parameters: WallhavenAPI.SearchParameters) async throws -> WallpaperSearchResponse {
-        print("[WallpaperVM] fetchFromPixiv called, query='\(parameters.query)', page=\(parameters.page), puritySFW=\(puritySFW), puritySketchy=\(puritySketchy), purityNSFW=\(purityNSFW)")
-        
-        // 每次请求前检查登录状态（从 WKWebView cookie 恢复到 HTTPCookieStorage）
-        await PixivAuthService.shared.checkLoginState()
-        
-        // 将 App 的 3 级纯度筛选映射为 Pixiv API 参数
-        // Pixiv API 只有 2 种模式：safe / r18 / all
-        // Sketchy 需要通过客户端过滤实现
-        let pixivMode: String = {
-            if puritySFW && !puritySketchy && !purityNSFW {
-                // 仅 SFW
-                return "safe"
-            } else if purityNSFW && !puritySFW && !puritySketchy {
-                // 仅 NSFW
-                return "r18"
-            } else {
-                // 其他组合（SFW+Sketchy, SFW+NSFW, Sketchy+NSFW, 全部）
-                return "all"
-            }
-        }()
-
-        // Pixiv Web 搜索 ai_type 仅接受 1（屏蔽 AI）；其余值（包括 0/2）均视为不过滤
-        let aiTypeParam: Int? = pixivHideAI ? 1 : nil
-
-        // 清空旧的相关标签
-        pixivRelatedTags = []
-
-        // 如果有搜索词，使用搜索 API
-        if !parameters.query.isEmpty {
-            let (response, relatedTags) = try await PixivService.shared.search(
-                word: parameters.query,
-                page: parameters.page,
-                sort: selectedPixivSearchSort.apiValue,
-                mode: pixivMode,
-                workType: selectedPixivWorkType,
-                aiType: aiTypeParam
-            )
-            // 存储相关标签供 UI 显示
-            pixivRelatedTags = relatedTags
-            
-            // 客户端过滤：根据纯度筛选结果
-            return filterPixivResponseByPurity(response)
-        }
-
-        // 排行榜：根据纯度选择对应的 R18/非R18 模式
-        let rankingMode: String
-        if purityNSFW && !puritySFW && !puritySketchy {
-            // 仅 NSFW：使用 R18 排行榜
-            switch selectedPixivRankingMode {
-            case .daily: rankingMode = "daily_r18"
-            case .weekly: rankingMode = "weekly_r18"
-            case .monthly: rankingMode = "monthly_r18"
-            case .rookie: rankingMode = "rookie_r18"
-            case .original: rankingMode = "original_r18"
-            case .male: rankingMode = "male_r18"
-            case .female: rankingMode = "female_r18"
-            }
-        } else {
-            // 其他组合：使用普通排行榜
-            rankingMode = selectedPixivRankingMode.rawValue
-        }
-
-        // 作品类型映射为 content 参数（排行榜 API）
-        //   - .all   → 不传 content（API 默认返回 illust+manga 混合，无 ugoira）
-        //   - .illust → content=illust
-        //   - .manga  → content=manga
-        //   - .ugoira → content=ugoira（独立 ugoira 排行榜）
-        let contentParam: String?
-        switch selectedPixivWorkType {
-        case .all: contentParam = nil
-        case .illust: contentParam = "illust"
-        case .manga: contentParam = "manga"
-        case .ugoira: contentParam = "ugoira"
-        }
-
-        let response = try await PixivService.shared.ranking(
-            mode: rankingMode,
-            page: parameters.page,
-            date: nil,
-            content: contentParam
-        )
-
-        // 客户端过滤：根据纯度筛选结果
-        return filterPixivResponseByPurity(response)
-    }
-    
-    /// 根据纯度设置过滤 Pixiv 响应
-    private func filterPixivResponseByPurity(_ response: WallpaperSearchResponse) -> WallpaperSearchResponse {
-        let filtered = response.data.filter { wallpaper in
-            switch wallpaper.purity {
-            case "sfw":
-                return puritySFW
-            case "sketchy":
-                return puritySketchy
-            case "nsfw":
-                return purityNSFW
-            default:
-                return true
-            }
-        }
-        
-        return WallpaperSearchResponse(
-            meta: response.meta,
-            data: filtered
-        )
-    }
-
-    /// 给 WallHaven 请求加上短超时保护，超时后立即取消并抛错以便触发降级
     private func withWallhavenTimeout<T: Sendable>(seconds: TimeInterval, operation: @escaping @Sendable () async throws -> T) async throws -> T {
         try await withThrowingTaskGroup(of: T.self) { group in
             group.addTask {
@@ -1536,48 +1051,16 @@ class WallpaperViewModel: ObservableObject {
         }
     }
 
-    /// 当前数据源是否支持 NSFW 筛选
-    var currentSourceSupportsNSFW: Bool {
-        // Pixiv 需要登录后才能使用 NSFW 筛选
-        if sourceManager.activeSource == .pixiv {
-            return PixivAuthService.shared.isLoggedIn
-        }
-        return sourceManager.currentSourceSupportsNSFW
-    }
-
-    /// 只有 Wallhaven 的 NSFW 开关依赖 Wallhaven API Key。
-    var currentSourceRequiresAPIKeyForNSFW: Bool {
-        sourceManager.activeSource == .wallhaven
-    }
-
-    /// 当前数据源是否支持 WallHaven 风格排序
-    var currentSourceSupportsWallhavenSorting: Bool {
-        sourceManager.currentSourceSupportsWallhavenSorting
-    }
-
-    /// 当前数据源是否支持比例筛选
-    var currentSourceSupportsRatioFilter: Bool {
-        sourceManager.currentSourceSupportsRatioFilter
-    }
-
-    /// 当前数据源是否支持颜色筛选
-    var currentSourceSupportsColorFilter: Bool {
-        sourceManager.currentSourceSupportsColorFilter
-    }
-
-    /// 当前数据源是否使用 WallHaven 风格分类（general/anime/people）
-    var currentSourceSupportsWallhavenCategories: Bool {
-        sourceManager.currentSourceSupportsWallhavenCategories
-    }
-
-    /// 当前数据源是否支持分类筛选
-    var currentSourceSupportsCategories: Bool {
-        sourceManager.currentSourceSupportsCategories
-    }
+    var currentSourceSupportsNSFW: Bool { true }
+    var currentSourceRequiresAPIKeyForNSFW: Bool { true }
+    var currentSourceSupportsWallhavenSorting: Bool { true }
+    var currentSourceSupportsRatioFilter: Bool { true }
+    var currentSourceSupportsColorFilter: Bool { true }
+    var currentSourceSupportsWallhavenCategories: Bool { true }
+    var currentSourceSupportsCategories: Bool { true }
 
     private func normalizedCategoryMask() -> String {
-        let hidePeopleForDefaultFeed = sourceManager.activeSource == .wallhaven
-            && categoryGeneral
+        let hidePeopleForDefaultFeed = categoryGeneral
             && categoryAnime
             && categoryPeople
             && WallhavenBrowsePreferences.hidePeopleByDefault()
@@ -1624,7 +1107,6 @@ class WallpaperViewModel: ObservableObject {
 
     /// 应用首页固定的横屏限制，以及 Wallhaven 的人物默认偏好。
     func applyingWallhavenHomeDisplayFilters(to wallpapers: [Wallpaper]) -> [Wallpaper] {
-        guard sourceManager.activeSource == .wallhaven else { return wallpapers }
 
         let hidePeople = WallhavenBrowsePreferences.hidePeopleByDefault()
 
@@ -1720,78 +1202,11 @@ class WallpaperViewModel: ObservableObject {
     }
 
     func downloadWallpaperData(_ wallpaper: Wallpaper, taskID: String? = nil) async throws -> Data {
-        var downloadURL: URL?
-
-        // Pixiv 源壁纸：先解析原图 URL，再用 PixivService.downloadImage 下载
-        if wallpaper.source == "pixiv" {
-            // 从 wallpaper.id 提取 illust ID: "pixiv_12345" → "12345"
-            let rawID = wallpaper.id.replacingOccurrences(of: "pixiv_", with: "")
-            do {
-                let detail = try await PixivService.shared.illustDetail(id: rawID)
-                return try await PixivService.shared.downloadImage(url: detail.urls.original)
-            } catch {
-                AppLogger.warn(.wallpaper, "Pixiv 原图解析失败，使用预览图降级", metadata: ["id": rawID, "error": "\(error)"])
-                return try await PixivService.shared.downloadImage(url: wallpaper.path)
-            }
-        }
-
-        // 4K 源壁纸：优先使用 thumbs.original（真正的原图 URL）
-        // 因为 fullImageURL（path）现在存的是缩略图 URL，用于展示而非下载
-        if wallpaper.source == "4kwallpapers",
-           !wallpaper.thumbs.original.isEmpty,
-           wallpaper.thumbs.original.contains("/images/wallpapers/"),
-           let originalURL = URL(string: wallpaper.thumbs.original) {
-            downloadURL = originalURL
-        } else {
-            downloadURL = wallpaper.fullImageURL ?? wallpaper.thumbURL
-        }
-
-        // 4K 源壁纸兜底：如果原图 URL 不是有效图片链接，从详情页解析原图
-        // ⚠️ 2026-11-02 起列表不再靠关键词猜原图尺寸，thumbs.original 常常是 1280px 的
-        //    thumbs_3t 预览图（站点对猜错尺寸也返回 200，静默给出裁切图）。
-        //    因此只要 thumbs.original 不是站点确认的 /images/wallpapers/ 原图，就必须走详情页解析，
-        //    不能退化成「用预览图当原图下载」。
-        if wallpaper.source == "4kwallpapers" {
-            let currentOriginal = wallpaper.thumbs.original
-            let hasConfirmedOriginal = currentOriginal.contains("/images/wallpapers/")
-
-            if !hasConfirmedOriginal {
-                if let resolved = await FourKWallpapersService.shared.fetchOriginalImageURL(for: wallpaper),
-                   let url = URL(string: resolved) {
-                    downloadURL = url
-                } else {
-                    AppLogger.warn(.wallpaper, "4K 原图解析失败，降级为高清预览图", metadata: [
-                        "id": wallpaper.id,
-                        "detail": wallpaper.url
-                    ])
-                    downloadURL = wallpaper.thumbURL
-                }
-            }
-        }
-
-        guard let downloadURL else {
+        guard WallhavenContentPolicy.isWallpaperRecord(id: wallpaper.id, detailURL: wallpaper.url, imagePath: wallpaper.path),
+              let downloadURL = WallhavenContentPolicy.imageURL(wallpaper.path), downloadURL.host == "w.wallhaven.cc" else {
             throw NetworkError.invalidResponse
         }
-
-        // 本地文件：直接读取数据
-        if downloadURL.isFileURL {
-            guard FileManager.default.fileExists(atPath: downloadURL.path) else {
-                throw DownloadError.fileNotFound
-            }
-            return try Data(contentsOf: downloadURL)
-        }
-
-        let headers: [String: String]
-        switch wallpaper.source {
-        case "konachan":
-            headers = KonachanRequestConfiguration.imageHeaders(for: downloadURL)
-        case "4kwallpapers":
-            headers = FourKWallpapersService.imageHeaders(referer: wallpaper.url)
-        default:
-            headers = [:]
-        }
-
-        return try await networkService.fetchImage(from: downloadURL, headers: headers) { progress in
+        return try await networkService.fetchImage(from: downloadURL, headers: [:]) { progress in
             guard let taskID else { return }
             Task { @MainActor in
                 DownloadTaskService.shared.updateProgress(id: taskID, progress: min(progress * 0.9, 0.9))
@@ -1832,17 +1247,7 @@ class WallpaperViewModel: ObservableObject {
 
     // MARK: - 获取精选壁纸（用于轮播）- 日榜，仅横版
     func fetchFeaturedWallpapers() async throws -> [Wallpaper] {
-        let sourceManager = WallpaperSourceManager.shared
-        switch sourceManager.activeSource {
-        case .fourKWallpapers:
-            return try await FourKWallpapersService.shared.fetchFeatured(limit: 24)
-        case .wallhaven:
-            return try await featuredFromMainSource()
-        case .konachan:
-            return try await KonachanService.shared.fetchFeatured(limit: 24)
-        case .pixiv:
-            return try await PixivService.shared.fetchFeatured(limit: 24)
-        }
+        try await featuredFromMainSource()
     }
 
     private func featuredFromMainSource() async throws -> [Wallpaper] {
@@ -1862,17 +1267,7 @@ class WallpaperViewModel: ObservableObject {
 
     // MARK: - 获取 Top 列表
     func fetchTopWallpapers() async throws -> [Wallpaper] {
-        let sourceManager = WallpaperSourceManager.shared
-        switch sourceManager.activeSource {
-        case .fourKWallpapers:
-            return try await FourKWallpapersService.shared.fetchTop(limit: 8)
-        case .wallhaven:
-            return try await topFromMainSource()
-        case .konachan:
-            return try await KonachanService.shared.fetchTop(limit: 8)
-        case .pixiv:
-            return try await PixivService.shared.fetchTop(limit: 8)
-        }
+        try await topFromMainSource()
     }
 
     private func topFromMainSource() async throws -> [Wallpaper] {
@@ -1892,17 +1287,7 @@ class WallpaperViewModel: ObservableObject {
 
     // MARK: - 获取 Latest 列表
     func fetchLatestWallpapers() async throws -> [Wallpaper] {
-        let sourceManager = WallpaperSourceManager.shared
-        switch sourceManager.activeSource {
-        case .fourKWallpapers:
-            return try await FourKWallpapersService.shared.fetchLatest(limit: 8)
-        case .wallhaven:
-            return try await latestFromMainSource()
-        case .konachan:
-            return try await KonachanService.shared.fetchLatest(limit: 8)
-        case .pixiv:
-            return try await PixivService.shared.fetchLatest(limit: 8)
-        }
+        try await latestFromMainSource()
     }
 
     private func latestFromMainSource() async throws -> [Wallpaper] {

@@ -100,7 +100,7 @@ final class GlobalWallpaperSyncCoordinator {
 
     struct WallpaperApplySupersededError: LocalizedError {
         let screenIDs: Set<String>
-        let requestToken: WallpaperCrossTypeTransitionCoordinator.RequestToken
+        let requestToken: StaticWallpaperRequestCoordinator.RequestToken
 
         var errorDescription: String? { t("壁纸设置已被更新请求取代") }
     }
@@ -152,7 +152,7 @@ final class GlobalWallpaperSyncCoordinator {
         guard !isStopping else { throw CancellationError() }
         var options = options
         if options.wallpaperTransitionToken == nil {
-            options.wallpaperTransitionToken = WallpaperCrossTypeTransitionCoordinator.shared
+            options.wallpaperTransitionToken = StaticWallpaperRequestCoordinator.shared
                 .beginRequest(on: NSScreen.screens).generationsByScreen
         }
         let snapshot = Snapshot(
@@ -324,12 +324,12 @@ final class GlobalWallpaperSyncCoordinator {
                 }
                 let ownedScreens = NSScreen.screens.filter { screen in
                     superseded.screenIDs.contains(screen.wallpaperScreenIdentifier)
-                        && WallpaperCrossTypeTransitionCoordinator.shared.isCurrent(
+                        && StaticWallpaperRequestCoordinator.shared.isCurrent(
                             superseded.requestToken, on: screen
                         )
                 }
                 guard !ownedScreens.isEmpty else { throw error }
-                guard let rollbackToken = WallpaperCrossTypeTransitionCoordinator.shared.subset(
+                guard let rollbackToken = StaticWallpaperRequestCoordinator.shared.subset(
                     superseded.requestToken, screens: ownedScreens
                 ) else { throw error }
                 var rollbackOptions = rollbackSnapshot.options(isGlobalTransaction: true)
@@ -353,13 +353,13 @@ final class GlobalWallpaperSyncCoordinator {
             // 回滚沿用原请求所有权，只恢复仍归本次请求的在线屏幕。
             try Task.checkCancellation()
             guard let generations = request.snapshot.wallpaperTransitionToken else { throw error }
-            let owner = WallpaperCrossTypeTransitionCoordinator.RequestToken(generationsByScreen: generations)
+            let owner = StaticWallpaperRequestCoordinator.RequestToken(generationsByScreen: generations)
             let originalIDs = Set(targetScreens.map(\.wallpaperScreenIdentifier))
             let rollbackScreens = NSScreen.screens.filter {
                 originalIDs.contains($0.wallpaperScreenIdentifier)
-                    && WallpaperCrossTypeTransitionCoordinator.shared.isCurrent(owner, on: $0)
+                    && StaticWallpaperRequestCoordinator.shared.isCurrent(owner, on: $0)
             }
-            guard let rollbackToken = WallpaperCrossTypeTransitionCoordinator.shared.subset(owner, screens: rollbackScreens) else { throw error }
+            guard let rollbackToken = StaticWallpaperRequestCoordinator.shared.subset(owner, screens: rollbackScreens) else { throw error }
             var rollbackOptions = rollbackSnapshot.options(isGlobalTransaction: true)
             rollbackOptions.wallpaperTransitionToken = rollbackToken.generationsByScreen
             do {

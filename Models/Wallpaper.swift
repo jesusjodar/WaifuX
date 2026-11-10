@@ -2,8 +2,7 @@ import Foundation
 
 struct Wallpaper: Identifiable, Codable, Hashable {
     let id: String
-    /// 卡片标题（作品名）。Pixiv 等第三方数据源直接填充作品名；
-    /// Wallhaven API 未提供该字段（解码为 nil），UI 回退到 uploader / category。
+    /// Optional legacy title; Wallhaven cards fall back to uploader or category.
     let title: String?
     var url: String
     let shortUrl: String?
@@ -26,9 +25,6 @@ struct Wallpaper: Identifiable, Codable, Hashable {
     var thumbs: Thumbs
     let tags: [Tag]?
     let uploader: Uploader?
-    /// Pixiv 作者 ID。Wallhaven 使用 `uploader.username`，而 Pixiv 的作者作品接口必须使用数字用户 ID。
-    var pixivAuthorID: String? = nil
-
     var fullURL: URL? { URL(string: url) }
     var thumbURL: URL? { Self.normalizedImageURL(from: thumbs.large) }
     var originalThumbURL: URL? { Self.normalizedImageURL(from: thumbs.original) }
@@ -179,16 +175,9 @@ struct Wallpaper: Identifiable, Codable, Hashable {
             return t("anime")
         case "people":
             return t("people")
-        case "manga":
-            return t("漫画")
         default:
             return category.capitalized
         }
-    }
-
-    /// Pixiv 漫画（用于卡片点击分流到 MangaDetailSheet）
-    var isPixivManga: Bool {
-        source == "pixiv" && category.lowercased() == "manga"
     }
 
     var purityDisplayName: String {
@@ -242,11 +231,10 @@ struct Wallpaper: Identifiable, Codable, Hashable {
             .first(where: { !$0.isEmpty && $0.lowercased() != "wallpaper" })
     }
 
-    /// 补齐作者信息（搜索列表常缺 uploader / pixivAuthorID），用于作者批量下载记录与文件夹复用。
-    func stampingAuthor(uploader: Uploader?, pixivAuthorID: String?) -> Wallpaper {
+    /// Fill missing uploader metadata for author downloads.
+    func stampingAuthor(uploader: Uploader?) -> Wallpaper {
         let resolvedUploader = self.uploader ?? uploader
-        let resolvedPixivAuthorID = self.pixivAuthorID ?? pixivAuthorID
-        guard resolvedUploader != self.uploader || resolvedPixivAuthorID != self.pixivAuthorID else {
+        guard resolvedUploader != self.uploader else {
             return self
         }
         return Wallpaper(
@@ -271,8 +259,7 @@ struct Wallpaper: Identifiable, Codable, Hashable {
             path: path,
             thumbs: thumbs,
             tags: tags,
-            uploader: resolvedUploader,
-            pixivAuthorID: resolvedPixivAuthorID
+            uploader: resolvedUploader
         )
     }
 
@@ -298,7 +285,6 @@ struct Wallpaper: Identifiable, Codable, Hashable {
         case fileType = "file_type"
         case createdAt = "created_at"
         case colors, path, thumbs, tags, uploader
-        case pixivAuthorID = "pixiv_author_id"
     }
 
     struct Thumbs: Codable, Hashable {
@@ -585,16 +571,13 @@ struct WallpaperDownloadRecord: Identifiable, Codable, Hashable {
     var downloadedAt: Date
     var metadata: SyncMetadata
     var folderID: String?
-    /// 是否已完成 crossfade 循环预处理（替换原始文件后标记为 true）
-    var isLooped: Bool?
 
     init(
         wallpaper: Wallpaper,
         localFilePath: String,
         downloadedAt: Date = .now,
         metadata: SyncMetadata? = nil,
-        folderID: String? = nil,
-        isLooped: Bool? = nil
+        folderID: String? = nil
     ) {
         self.id = wallpaper.id
         self.wallpaper = wallpaper
@@ -605,7 +588,6 @@ struct WallpaperDownloadRecord: Identifiable, Codable, Hashable {
             entityType: "wallpaper.download"
         )
         self.folderID = folderID
-        self.isLooped = isLooped
     }
 
     var localFileURL: URL {
@@ -617,7 +599,7 @@ struct WallpaperDownloadRecord: Identifiable, Codable, Hashable {
     }
 
     enum CodingKeys: String, CodingKey {
-        case id, wallpaper, localFilePath, downloadedAt, metadata, folderID, isLooped
+        case id, wallpaper, localFilePath, downloadedAt, metadata, folderID
     }
 
     init(from decoder: Decoder) throws {
@@ -629,7 +611,6 @@ struct WallpaperDownloadRecord: Identifiable, Codable, Hashable {
         metadata = try container.decodeIfPresent(SyncMetadata.self, forKey: .metadata)
             ?? SyncMetadata(recordID: "wallpaper.download.\(wallpaper.id)", entityType: "wallpaper.download")
         folderID = try container.decodeIfPresent(String.self, forKey: .folderID)
-        isLooped = try container.decodeIfPresent(Bool.self, forKey: .isLooped)
     }
 }
 

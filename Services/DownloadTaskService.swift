@@ -63,7 +63,7 @@ class DownloadTaskService: ObservableObject {
     private init() {
         if BackgroundRuntimeRole.isRemoteUI {
             BackgroundRuntimeBridge.observe { [weak self] snapshot in
-                guard let bytes = snapshot["downloads"] as? Data, let tasks = try? JSONDecoder().decode([DownloadTask].self, from: bytes) else { return }
+                guard let bytes = snapshot["downloads"] as? Data, let tasks = try? LegacyRecordReader.read(DownloadTask.self, from: bytes).records else { return }
                 self?.tasks = tasks
             }
         }
@@ -418,7 +418,7 @@ class DownloadTaskService: ObservableObject {
 
     private func loadTasks() {
         if let data = WaifuXPreferences.shared.data(forKey: userDefaultsKey),
-           let loadedTasks = try? JSONDecoder().decode([DownloadTask].self, from: data) {
+           let loadedTasks = try? LegacyRecordReader.read(DownloadTask.self, from: data).records {
             // 重置中间态任务为暂停状态（因为重启后下载不会自动继续）
             tasks = loadedTasks.map { task in
                 var modifiedTask = task

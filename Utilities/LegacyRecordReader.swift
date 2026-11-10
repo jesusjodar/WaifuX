@@ -15,6 +15,19 @@ enum LegacyRecordReader {
         accepting: (Record) -> Bool = { _ in true }
     ) throws -> Result<Record> {
         let elements = try JSONDecoder().decode(Elements<Record>.self, from: data)
+        return result(elements, accepting: accepting)
+    }
+
+    static func read<Record: Decodable>(
+        _ type: Record.Type, from decoder: Decoder,
+        accepting: (Record) -> Bool = { _ in true }
+    ) throws -> Result<Record> {
+        try result(Elements<Record>(from: decoder), accepting: accepting)
+    }
+
+    private static func result<Record>(
+        _ elements: Elements<Record>, accepting: (Record) -> Bool
+    ) -> Result<Record> {
         let accepted = elements.records.filter(accepting)
         return Result(records: accepted, rejectedCount: elements.totalCount - accepted.count)
     }

@@ -192,15 +192,6 @@ final class WallpaperLibraryService: ObservableObject {
         }
     }
 
-    func markAsLooped(localFilePath path: String) {
-        if BackgroundRuntimeRole.isRemoteUI { BackgroundRuntimeBridge.send("library.wallpaper.markAsLooped0", ["path": path]); return }
-
-        guard let index = downloadRecords.firstIndex(where: { $0.localFilePath == path }) else { return }
-        downloadRecords[index].isLooped = true
-        saveDlToCache(downloadRecords[index])
-        syncDlIndex()
-    }
-
     func isDownloaded(_ wallpaper: Wallpaper) -> Bool {
         // ⚡ 先通过 Set 快速判断（O(1)），再通过字典索引 O(1) 获取记录
         guard downloadIDSet.contains(wallpaper.id),
