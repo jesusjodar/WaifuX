@@ -63,6 +63,13 @@ fi
 while IFS= read -r -d '' bundle; do
   sign_bundle --deep "$bundle"
 done < <(find "$app/Contents/Frameworks" -maxdepth 1 -name '*.framework' -print0)
+# Xcode Debug products carry executable code in .debug.dylib (and may also
+# include __preview.dylib). Sign those code objects before their parent bundles.
+for executable_dir in "$app/Contents/MacOS" "$app/Contents/Helpers/WaifuXHelper.app/Contents/MacOS"; do
+  while IFS= read -r -d '' library; do
+    sign_bundle "$library"
+  done < <(find "$executable_dir" -maxdepth 1 -type f -name '*.dylib' -print0)
+done
 sign_bundle --entitlements "$helper_entitlements" "$app/Contents/Helpers/WaifuXHelper.app"
 sign_bundle --entitlements "$repo_root/WaifuX.entitlements" "$app"
 python3 "$repo_root/scripts/verify-project-configuration.py" --app "$app" --signed --architectures $build_archs
