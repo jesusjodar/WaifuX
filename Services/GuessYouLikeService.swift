@@ -67,11 +67,11 @@ final class GuessYouLikeService {
         }
         text = text.replacingOccurrences(of: "_", with: " ")
         text = text.replacingOccurrences(of: "-", with: " ")
-        for suffix in [" live wallpapers", " wallpapers", " wallpaper"] where text.hasSuffix(suffix) {
+        for suffix in [" wallpapers", " wallpaper"] where text.hasSuffix(suffix) {
             text.removeLast(suffix.count)
             text = text.trimmingCharacters(in: .whitespacesAndNewlines)
         }
-        let ignored: Set<String> = ["", "wallpaper", "wallpapers", "live", "video", "dynamic", "sfw", "general", "motionbg", "motionbgs"]
+        let ignored: Set<String> = ["", "wallpaper", "wallpapers", "sfw", "general"]
         return ignored.contains(text) ? nil : text
     }
 

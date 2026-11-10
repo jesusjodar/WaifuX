@@ -1654,7 +1654,7 @@ private struct WallpaperExploreAtmosphereBackground: View {
     let grainIntensity: Double
 
 
-    /// 动态壁纸正在播放时启用轻量特效，降低 GPU/WindowServer 压力
+    /// 列表高速滚动时启用轻量特效，降低 GPU/WindowServer 压力
 
 
     var body: some View {

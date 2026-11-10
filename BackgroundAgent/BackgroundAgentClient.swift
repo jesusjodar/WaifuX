@@ -488,15 +488,12 @@ final class BackgroundAgentClient: ObservableObject {
         let hello = try JSONDecoder().decode(BackgroundAgentHello.self, from: helloData)
         let data = try await exchange(using: diagnosticConnection) { proxy, gate in proxy.subscribe { gate.finish(.success($0 as Data)) } }
         let snapshot = try BackgroundPropertyList.decode(data)
-        let video = snapshot["video"] as? [String: Any] ?? [:]
         return ["serviceStatus": service.status.rawValue, "helperPID": hello.processIdentifier,
                 "helperBundleID": hello.bundleIdentifier, "ready": hello.runtimeReady,
                 "loadedCodeIdentity": hello.buildIdentity ?? "",
                 "embeddedCodeIdentity": BackgroundAgentBuildIdentity.executable(WaifuXHostBundle.bundleURL.appendingPathComponent("Contents/Helpers/WaifuXHelper.app/Contents/MacOS/WaifuXHelper")) ?? "",
                 "menuBar": snapshot["menuBar"] as? [String: Any] ?? [:],
-                "appearance": snapshot["appearance"] as? [String: Any] ?? [:],
-                "nativePlayerCount": video["nativePlayerCount"] as? Int ?? 0,
-                "nativeWindowCount": video["nativeWindowCount"] as? Int ?? 0]
+                "appearance": snapshot["appearance"] as? [String: Any] ?? [:]]
     }
 
     /// Exercises the real command queue, subscription and exit drain without
@@ -1127,9 +1124,7 @@ final class BackgroundAgentClient: ObservableObject {
         // A new Mach-service probe can relaunch a successfully stopped job.
         // Observe only the acknowledged process while waiting for its exit.
         //
-        // Helper 收到 runtime.stop 后还要收尾渲染器与子进程（动态壁纸渲染中
-        // 可达数秒，见 BackgroundAgentRuntime.stopAll）。3.5s 会把「正在正常
-        // 退出」误判成失败，并让第二次尝试落到 BTM 状态分支上。
+        // Allow the helper to finish its durable writers before checking process exit.
         for _ in 0..<100 {
             if helperProcessGone(pid) { return }
             try await Task.sleep(for: .milliseconds(100))

@@ -21,28 +21,9 @@ final class WaifuXPreferences: UserDefaults, @unchecked Sendable {
         let suite = ProcessInfo.processInfo.environment["WAIFUX_HELPER_TEST_SUITE"]
             ?? BackgroundAgentWire.preferencesSuite
         preferencesSuite = suite
-        // 隔离回归不可把测试值写进真实的 com.waifux.app。生产 Helper 即使
-        // 尚未收到主程序的偏好迁移，也必须能读到旧域中的 Steam 会话标识。
+        // Isolated regressions must never access the installed application's preferences.
         legacySuiteName = BackgroundRuntimeRole.isIsolatedTest ? suite + ".legacy" : "com.waifux.app"
         super.init(suiteName: suite)!
-    }
-
-    /// Data reset runs in the UI only after the Helper has stopped, so no
-    /// background writer can repopulate the removed preferences or files.
-    func resetAfterHelperStopped() {
-        precondition(BackgroundRuntimeRole.isRemoteUI)
-        stateLock.lock()
-        defer { stateLock.unlock() }
-        pending.removeAll()
-        legacy.removeAll()
-        bufferedMutations.removeAll()
-        mutationHandler = nil
-        super.removePersistentDomain(forName: preferencesSuite)
-        if !BackgroundRuntimeRole.isIsolatedTest {
-            UserDefaults.standard.removePersistentDomain(forName: "com.waifux.app")
-            UserDefaults.standard.synchronize()
-        }
-        super.synchronize()
     }
 
     func loadLegacyPreferences() {
@@ -50,27 +31,6 @@ final class WaifuXPreferences: UserDefaults, @unchecked Sendable {
         stateLock.lock()
         legacy = legacyDomainSnapshot()
         stateLock.unlock()
-    }
-
-    /// Helper 恢复 Steam 会话时按需读旧域。不能像 UI 那样用 legacy 字典兜底
-    /// 所有键：登出/清除操作已经落到新域后，旧域残值会绕过删除重新登录。
-    func legacyStringForSessionRestore(_ key: String) -> String? {
-        guard BackgroundRuntimeRole.isHelper,
-              !bool(forKey: BackgroundAgentWire.migrationKey),
-              super.object(forKey: key) == nil else { return nil }
-        return legacyDomainSnapshot()[key] as? String
-    }
-
-    func legacyIntegerForSessionRestore(_ key: String) -> Int? {
-        guard BackgroundRuntimeRole.isHelper,
-              !bool(forKey: BackgroundAgentWire.migrationKey),
-              super.object(forKey: key) == nil else { return nil }
-        return (legacyDomainSnapshot()[key] as? NSNumber)?.intValue
-    }
-
-    func removeLegacySessionValue(forKey key: String) {
-        guard BackgroundRuntimeRole.isHelper else { return }
-        UserDefaults(suiteName: legacySuiteName)?.removeObject(forKey: key)
     }
 
     private func legacyDomainSnapshot() -> [String: Any] {

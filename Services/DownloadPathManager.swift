@@ -8,7 +8,6 @@ final class DownloadPathManager {
     static let shared = DownloadPathManager()
 
     /// 与设置中的开关一致：是否写入应用内媒体库
-    static let persistDownloadsToAppLibraryDefaultsKey = "save_to_downloads"
     /// 用户自定义下载根目录路径（ bookmarks 数据，用于跨启动保持访问权限）
     static let customDownloadRootBookmarkKey = "custom_download_root_bookmark_v1"
     /// 用户自定义下载根目录的纯路径字符串（仅用于展示）

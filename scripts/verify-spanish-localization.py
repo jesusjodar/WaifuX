@@ -17,7 +17,7 @@ text = SOURCE.read_text()
 entry_pattern = r'^\s*"((?:[^"\\]|\\.)*)": "((?:[^"\\]|\\.)*)",?\s*$'
 tables = {}
 for language, body in re.findall(
-    r'\.(spanish|english|chinese|japanese): \[(.*?)(?=\n\s*\.(?:spanish|english|chinese|japanese): \[|\n\s*\]\n\s*\])',
+    r'\.(spanish|english|chinese|japanese): \[(.*?)(?=\n\s*\.(?:spanish|english|chinese|japanese): \[|\n\s*\],?\n\s*\])',
     text, re.S,
 ):
     entries = re.findall(entry_pattern, body, re.M)
@@ -44,8 +44,8 @@ for folder in ["App", "Views", "Components", "Models", "ViewModels", "Services",
             if "\\(" not in key:
                 assert key in tables["spanish"], (source, key)
 
-# Test actual Swift lookup, persistence, notification, locale detection and HTML escaping.
-# Never link the app/helper or use the real preference domain.
+# Exercise the production Swift service with an in-memory preference stub.
+# No application, helper, editor or retired feature is loaded.
 harness = r'''
 import Foundation
 final class WaifuXPreferences {
@@ -55,66 +55,32 @@ final class WaifuXPreferences {
     func string(forKey key: String) -> String? { values[key] }
 }
 let localization = LocalizationService.shared
-assert(localization.currentLanguage == .spanish, "Spanish system locale not detected")
-assert(LocalizationService.Language.allCases.contains(.spanish))
+assert(localization.currentLanguage == .spanish)
 assert(LocalizationService.Language.spanish.displayName == "Español (España)")
 var notified = false
 let observer = NotificationCenter.default.addObserver(forName: .appLanguageDidChange, object: nil, queue: nil) { _ in notified = true }
 localization.setLanguage(.english)
-assert(notified)
-assert(t("nav.home") == "HOME")
+assert(notified && t("nav.home") == "HOME")
 WaifuXPreferences.shared.set("es", forKey: "app_language")
 localization.restoreSavedSettings()
-assert(localization.currentLanguage == .spanish)
-assert(t("nav.home") == "INICIO")
-assert(AnimeHotTag.daily.apiTagName == "日常")
-assert(AnimeHotTag.lightNovel.apiTagName == "轻小说改")
-assert(WallpaperEnginePropertyLocalizer.label(for: "ui_browse_properties_brightness") == "Brillo")
-assert(WallpaperEnginePropertyLocalizer.label(for: "background") == "Fondo")
-assert(WaifuXPreferences.shared.string(forKey: "app_language") == "es")
+assert(localization.currentLanguage == .spanish && t("nav.home") == "INICIO")
+assert(t("statusbar.cropAdjust") == "Ajustar área de recorte…")
+assert(t("tutorial.wallhaven.l1").contains("imágenes estáticas de Wallhaven"))
 assert(t("unknown.test.key") == "unknown.test.key")
 assert(String(format: t("repairResult"), 1, 2, 3, 4, 5).contains("reparados: 2"))
-assert(String(format: t("downloads.batchResult"), 2, 1).contains("Correctas: 2"))
-assert(localization.legacyLabel("亮度") == "Brillo")
-let editor = try String(contentsOfFile: CommandLine.arguments[1], encoding: .utf8)
-let translated = localization.localizedEditorHTML(editor)
-assert(translated.contains("lang=\"es-ES\""))
-assert(!translated.contains("设计场景"))
-assert(!translated.contains("赞赏支持"))
-assert(!translated.contains("没有可编辑的动态文本元素"))
-assert(translated.contains("notifyDesignChange(entry.id, 'hidden', val)"))
-let saverSource = try String(contentsOfFile: CommandLine.arguments[2], encoding: .utf8)
-assert(!saverSource.isEmpty)
-assert(SaverLocalization.string("missingMedia", language: "es-ES").contains("Falta el archivo"))
-assert(SaverLocalization.string("missingMedia", language: "es-MX").contains("Falta el archivo"))
-assert(SaverLocalization.string("missingMedia", language: "en").contains("missing"))
 localization.setLanguage(.japanese)
 assert(t("nav.home") == "ホーム")
-assert(t("episode.number") == "Episode %d")
-assert(localization.localizedEditorHTML(editor) == editor)
 localization.setLanguage(.chinese)
 assert(t("nav.home") == "首页")
 NotificationCenter.default.removeObserver(observer)
-try translated.write(toFile: CommandLine.arguments[3], atomically: true, encoding: .utf8)
 print("LOCALIZATION_RUNTIME_PASSED")
 '''
 with tempfile.TemporaryDirectory(prefix="waifux-localization-") as directory:
     temp = Path(directory)
     (temp / "main.swift").write_text(harness)
-    hot_tags = (ROOT / "ViewModels/AnimeViewModel.swift").read_text()
-    (temp / "AnimeHotTag.swift").write_text("import Foundation\n" + hot_tags[hot_tags.index("enum AnimeHotTag:"):])
-    properties = (ROOT / "Services/SceneWallpaperPropertiesService.swift").read_text()
-    localizer = properties[properties.index("enum WallpaperEnginePropertyLocalizer {"):properties.index("/// 属性展示方式")]
-    (temp / "PropertyLocalizer.swift").write_text("import Foundation\nstruct WaifuXHostBundle { static func resourceCandidates(named: String) -> [URL] { [] } }\n" + localizer)
-    saver = (ROOT / "WaifuXScreenSaver/SaverConfiguration.swift").read_text()
-    (temp / "SaverLocalization.swift").write_text("import Foundation\n" + saver[saver.index("enum SaverLocalization {"):])
-    subprocess.run(["swiftc", str(SOURCE), str(temp / "SaverLocalization.swift"), str(temp / "AnimeHotTag.swift"), str(temp / "PropertyLocalizer.swift"), str(temp / "main.swift"), "-o", str(temp / "check")], check=True)
+    subprocess.run(["swiftc", str(SOURCE), str(temp / "main.swift"), "-o", str(temp / "check")], check=True)
     for locale in ["es-ES", "es-MX", "es"]:
-        subprocess.run([str(temp / "check"), str(ROOT / "Resources/WallpaperPropertyEditor.html"), str(ROOT / "WaifuXScreenSaver/SaverConfiguration.swift"), str(temp / "editor.html"), "-AppleLanguages", f"({locale})"], check=True)
-    # If Node is available, parse the exact localized JavaScript emitted by Swift.
-    import shutil
-    if shutil.which("node"):
-        html = (temp / "editor.html").read_text()
-        (temp / "editor.js").write_text("\n".join(re.findall(r'<script>(.*?)</script>', html, re.S)))
-        subprocess.run(["node", "--check", str(temp / "editor.js")], check=True)
-print(f"SPANISH_LOCALIZATION_PASSED english={len(tables['english'])} spanish={len(tables['spanish'])}")
+        subprocess.run([str(temp / "check"), "-AppleLanguages", f"({locale})"], check=True)
+assert all(set(table) == set(tables["spanish"]) for table in tables.values())
+assert not any(key.startswith(("screensaver", "animeRules", "tutorial.we.", "tutorial.sceneWeb.", "tutorial.lockScreen.")) for key in tables["spanish"])
+print(f"SPANISH_LOCALIZATION_PASSED static_keys={len(tables['spanish'])} languages=4")

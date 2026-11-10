@@ -379,7 +379,6 @@ private struct GeneralSettingsTab: View {
                 }
             }
 
-            // 动态壁纸设置组
 
 
 
@@ -473,13 +472,6 @@ private struct GeneralSettingsTab: View {
                     MacToggle(isOn: $viewModel.preventSystemSleep)
                 }
 
-                MacSettingsRow(
-                    title: t("saveToDownloadsFolder"),
-                    subtitle: nil,
-                    showDivider: false
-                ) {
-                    MacToggle(isOn: $viewModel.saveToDownloads)
-                }
             }
         }
 
@@ -500,13 +492,6 @@ private struct DownloadSettingsTab: View {
     var body: some View {
         MacSettingsForm {
             MacSettingsSection(header: t("downloadPreferences")) {
-                MacSettingsRow(
-                    title: t("saveToDownloadsFolder"),
-                    subtitle: t("saveToDownloadsDesc"),
-                    showDivider: true
-                ) {
-                    MacToggle(isOn: $viewModel.saveToDownloads)
-                }
 
                 // 下载目录选择
                 MacSettingsRow(
@@ -571,7 +556,6 @@ private struct DownloadSettingsTab: View {
                 }
             }
 
-            // 动态壁纸优化设置组。自动任务均由公共优化队列串行处理。
             // 手动「优化视频」始终可走循环分析 + 补帧；此处只控制下载后自动优化与目标帧率。
 
             // 缓存管理

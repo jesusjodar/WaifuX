@@ -16,9 +16,7 @@ final class SettingsViewModel: ObservableObject {
 
     init() {}
 
-    @Published var saveToDownloads = true {
-        didSet { WaifuXPreferences.shared.set(saveToDownloads, forKey: DownloadPathManager.persistDownloadsToAppLibraryDefaultsKey) }
-    }
+
 
     @Published private var themeModeRawValue: String = ThemeMode.dark.rawValue
 
@@ -184,7 +182,6 @@ final class SettingsViewModel: ObservableObject {
     func restoreSavedSettings() {
         let defaults = WaifuXPreferences.shared
         isBatchUpdating = true
-        saveToDownloads = defaults.object(forKey: DownloadPathManager.persistDownloadsToAppLibraryDefaultsKey) as? Bool ?? true
         themeModeRawValue = ThemeManager.savedMode(in: defaults).rawValue
         launchAtLogin = defaults.bool(forKey: "launch_at_login")
         swapMenuBarClickActions = defaults.bool(forKey: "menu_bar_swap_click_actions")

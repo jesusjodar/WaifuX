@@ -43,9 +43,6 @@ enum AppLogModule: String, CaseIterable {
     case ui          = "UI"
     case grid        = "Grid"        // RecyclableGridView 相关
     case wallpaper   = "Wallpaper"
-    case media       = "Media"
-    case anime       = "Anime"
-    case video       = "Video"
     case network     = "Network"
     case storage     = "Storage"
     case startup     = "Startup"
@@ -505,7 +502,7 @@ final class AppLogger: @unchecked Sendable {
         header += "导出时间: \(Date())\n"
         header += "版本: \(version)\n"
         header += "系统: \(ProcessInfo.processInfo.operatingSystemVersionString)\n"
-        header += "说明: 以下为各日志来源的尾部片段；渲染器日志另存桌面 zip。\n"
+        header += "说明: 以下为App 与 Helper 日志来源的尾部片段。\n"
         try header.write(to: destination, atomically: true, encoding: .utf8)
 
         var readableSegments = 0
@@ -517,25 +514,6 @@ final class AppLogger: @unchecked Sendable {
         } else {
             appendSkipped("APP RUNTIME LOG", reason: "日志路径不可用", to: destination)
         }
-
-        // 锁屏视频由独立的 Wallpaper Extension 播放。主 App 的日志没有
-        // reader 循环、解码失败和 WallpaperAgent update，诊断时需要同一份导出。
-        if let container = fm.containerURL(forSecurityApplicationGroupIdentifier: "group.com.waifux.app") {
-            readableSegments += appendLogSegment(
-                "WALLPAPER EXTENSION LOG",
-                from: container.appendingPathComponent("waifux-extension.log"),
-                maxBytes: 1024 * 1024,
-                to: destination
-            )
-        } else {
-            appendSkipped("WALLPAPER EXTENSION LOG", reason: "App Group 容器不可用", to: destination)
-        }
-        readableSegments += appendLogSegment(
-            "WALLPAPER EXTENSION LOG (fallback)",
-            from: URL(fileURLWithPath: "/tmp/waifux-extension.log"),
-            maxBytes: 512 * 1024,
-            to: destination
-        )
 
         // 退出/信号诊断（崩溃、异常退出时才有内容）
         let appSupport = fm.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
@@ -549,113 +527,6 @@ final class AppLogger: @unchecked Sendable {
         // 「无法与帮助程序通信」光看日志定不了案（2026-11-01：只有 4097，看不出
         // Helper 是起不来、被锁挡住还是旧进程在拒连），要现场的 launchd 与进程状态。
         readableSegments += appendHelperState(to: destination)
-
-        // Web 壁纸 daemon（主 App 未启用沙盒，/tmp 可直接读取）
-        readableSegments += appendLogSegment(
-            "WEB RENDERER DAEMON",
-            from: URL(fileURLWithPath: "/tmp/wallpaperengine-cli-debug.log"),
-            maxBytes: 512 * 1024,
-            to: destination
-        )
-        readableSegments += appendLogSegment(
-            "WEB RENDERER DAEMON OUTPUT",
-            from: URL(fileURLWithPath: "/tmp/wallpaperengine-cli-daemon.log"),
-            maxBytes: 256 * 1024,
-            to: destination
-        )
-        readableSegments += appendLogSegment(
-            "WALLPAPER EXTENSION KEEPER",
-            from: fm.homeDirectoryForCurrentUser.appendingPathComponent("Library/Logs/WaifuXKeeper.log"),
-            maxBytes: 256 * 1024,
-            to: destination
-        )
-
-        // 推送到手机：配对握手诊断 + 推送服务端输出（MobilePushService 落盘副本）
-        readableSegments += appendLogSegment(
-            "MOBILE PUSH PAIRING DEBUG",
-            from: fm.homeDirectoryForCurrentUser.appendingPathComponent(".waifux/pair-debug.log"),
-            maxBytes: 256 * 1024,
-            to: destination
-        )
-        readableSegments += appendLogSegment(
-            "MOBILE PUSH SERVER",
-            from: fm.homeDirectoryForCurrentUser.appendingPathComponent(".waifux/pair-server-client.log"),
-            maxBytes: 512 * 1024,
-            to: destination
-        )
-
-        // 最近的烘焙失败现场（按修改时间取前 3 份）
-        if let tmpFiles = try? fm.contentsOfDirectory(
-            at: fm.temporaryDirectory,
-            includingPropertiesForKeys: [.contentModificationDateKey],
-            options: [.skipsHiddenFiles]
-        ) {
-            let bakeLogs = tmpFiles
-                .filter {
-                    $0.lastPathComponent.hasPrefix("waifux-wallpaper-wgpu-bake-")
-                        && $0.pathExtension == "log"
-                }
-                .sorted { lhs, rhs in
-                    let left = (try? lhs.resourceValues(forKeys: [.contentModificationDateKey]))?
-                        .contentModificationDate ?? .distantPast
-                    let right = (try? rhs.resourceValues(forKeys: [.contentModificationDateKey]))?
-                        .contentModificationDate ?? .distantPast
-                    return left > right
-                }
-                .prefix(3)
-            for (index, url) in bakeLogs.enumerated() {
-                readableSegments += appendLogSegment(
-                    "SCENE BAKE #\(index + 1) (\(url.lastPathComponent))",
-                    from: url,
-                    maxBytes: 256 * 1024,
-                    to: destination
-                )
-            }
-        }
-
-        // wgpu 渲染器自身的 stdout/stderr 落在 Caches/com.waifux.wallpaperengine/renderer-logs
-        // （每屏一个文件，GPU init 失败/panic/事件循环异常只在这里）。逐屏并入主文件，
-        // 保证「全部日志」一次导出就是单个产物；wgpu 内部问题才能随导出送达。
-        // 最多取 6 个文件（常见 1–3 屏，留出历史屏位），避免多屏时把导出文件撑大。
-        // 测试钩子：WAIFUX_RENDERER_LOG_DIR 可把目录指到 fixture，生产环境不设置时走 Caches。
-        let rendererLogs: URL?
-        if let overridePath = getenv("WAIFUX_RENDERER_LOG_DIR"), strlen(overridePath) > 0 {
-            rendererLogs = URL(fileURLWithPath: String(cString: overridePath), isDirectory: true)
-        } else if let caches = fm.urls(for: .cachesDirectory, in: .userDomainMask).first {
-            rendererLogs = caches.appendingPathComponent(
-                "com.waifux.wallpaperengine/renderer-logs", isDirectory: true)
-        } else {
-            rendererLogs = nil
-        }
-        if let rendererLogs,
-           fm.fileExists(atPath: rendererLogs.path),
-           let rendererFiles = try? fm.contentsOfDirectory(
-               at: rendererLogs,
-               includingPropertiesForKeys: nil,
-               options: [.skipsHiddenFiles]
-           ) {
-            let logs = rendererFiles
-                .filter { $0.pathExtension == "log" }
-                // 优先取最近写过的屏（诊断价值最高）；同一时间戳再按 screen 数字稳定排序，
-                // 避免字典序把 screen-10 排到 screen-2 前面。
-                .sorted { lhs, rhs in
-                    let left = (try? lhs.resourceValues(forKeys: [.contentModificationDateKey]))?
-                        .contentModificationDate ?? .distantPast
-                    let right = (try? rhs.resourceValues(forKeys: [.contentModificationDateKey]))?
-                        .contentModificationDate ?? .distantPast
-                    if left != right { return left > right }
-                    return lhs.lastPathComponent.compare(rhs.lastPathComponent, options: .numeric) == .orderedAscending
-                }
-                .prefix(6)
-            for url in logs {
-                readableSegments += appendLogSegment(
-                    "RENDERER \(url.lastPathComponent)",
-                    from: url,
-                    maxBytes: 512 * 1024,
-                    to: destination
-                )
-            }
-        }
 
         guard readableSegments > 0 else {
             try? fm.removeItem(at: destination)

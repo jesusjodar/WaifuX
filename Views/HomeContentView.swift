@@ -486,7 +486,7 @@ struct HomeContentView: View {
                 )
             }
 
-            // 热门动态壁纸（使用独立的首页数据，不跟随 Explore 列表变化）
+            // 热门图片（使用独立的首页数据，不跟随 Explore 列表变化）
             // 仅当媒体模块启用时显示
 
         }
@@ -1515,7 +1515,7 @@ private struct HomeShelfDeckBackground: View {
     }
 }
 
-// MARK: - 首页媒体区域（动态壁纸）
+// MARK: - 首页图片区域
 
 
 /// Stable hit target for the small trailing button used by home shelves.

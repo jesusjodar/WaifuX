@@ -2,8 +2,7 @@ import Foundation
 
 // MARK: - WaifuX GuideKit · 导览脚本内容
 // 每页一段 GuideTour；文案 key 统一 guide.<tour>.<step>.title|body，
-// 三语（en/zh/ja）在 Services/LocalizationService.swift 同步维护。
-// 全部页面脚本清单见 Docs/Guide-Kit-Design.md §4。
+// 四语（es/en/zh/ja）在 Services/LocalizationService.swift 同步维护。
 
 enum GuideTours {
 
@@ -22,21 +21,21 @@ enum GuideTours {
     /// 详情页导览：由详情浮层打开时触发（GuideEngine.noteDetailOpened）。
     static let detail = GuideTour(
         id: "detail",
-        contentVersion: 1,
+        contentVersion: 2,
         steps: [
-            // ① 底部动作栏（收藏/预览/设为壁纸/静音/下载/更多）
+            // ① 底部动作栏（收藏/预览/设为壁纸/下载/更多）
             GuideStep(
                 anchor: .detailActionRow,
                 titleKey: "guide.detail.action.title",
                 bodyKey: "guide.detail.action.body"
             ),
-            // ② hero 浮层 info / eye 小按钮（Media/Wallpaper 两个 sheet 共用锚点）
+            // ② hero 浮层 info / eye 小按钮（Wallpaper 详情页锚点）
             GuideStep(
                 anchor: .detailHeroInfo,
                 titleKey: "guide.detail.overlay.title",
                 bodyKey: "guide.detail.overlay.body"
             ),
-            // ③ 信息行的作者胶囊：点开作者面板（Media/Wallpaper 三处作者按钮共用锚点）
+            // ③ 信息行的作者胶囊：点开作者面板（Wallpaper 作者按钮共用锚点）
             GuideStep(
                 anchor: .detailAuthorLink,
                 titleKey: "guide.detail.author.title",
@@ -55,7 +54,7 @@ enum GuideTours {
     /// 引擎会把遮罩抬到 .popUpMenu 之上）。
     static let detailMoreOptions = GuideTour(
         id: "detailMoreOptions",
-        contentVersion: 1,
+        contentVersion: 2,
         steps: [
             GuideStep(
                 anchor: .detailMorePopover,
@@ -65,13 +64,12 @@ enum GuideTours {
         ]
     )
 
-    /// 动态锁屏：设置页滚到该区块首次可见时播（noteSheetOpened；设置窗为独立 NSWindow）。
 
 
     /// 设置页总览：打开设置窗首次播（左栏分类逐个高亮）。
     static let settingsOverview = GuideTour(
         id: "settingsOverview",
-        contentVersion: 1,
+        contentVersion: 2,
         steps: [
             GuideStep(
                 anchor: nil,
@@ -109,7 +107,7 @@ enum GuideTours {
     /// 作者滑出面板：打开即播（noteSheetOpened；主窗口内 overlay）。
     static let authorSheet = GuideTour(
         id: "authorSheet",
-        contentVersion: 1,
+        contentVersion: 2,
         steps: [
             GuideStep(
                 anchor: .authorSheetHeader,
@@ -123,14 +121,13 @@ enum GuideTours {
 
     static let home = GuideTour(
         id: "home",
-        contentVersion: 1,
+        contentVersion: 2,
         steps: [
             GuideStep(
                 anchor: nil,
                 titleKey: "guide.home.welcome.title",
                 bodyKey: "guide.home.welcome.body"
             ),
-            // 顶部标签栏：五个页面各是什么（静态/动态壁纸的区别在这里讲清）
             GuideStep(
                 anchor: .homeTabBar,
                 titleKey: "guide.home.tabs.title",
@@ -163,7 +160,7 @@ enum GuideTours {
 
     static let explore = GuideTour(
         id: "wallpaperExplore",
-        contentVersion: 1,
+        contentVersion: 2,
         steps: [
             GuideStep(
                 anchor: .exploreHeader,
@@ -190,11 +187,9 @@ enum GuideTours {
         ]
     )
 
-    // MARK: 动态壁纸探索（3 步）
 
 
 
-    // MARK: 番剧（2 步）
 
 
 
@@ -202,7 +197,7 @@ enum GuideTours {
 
     static let library = GuideTour(
         id: "myMedia",
-        contentVersion: 1,
+        contentVersion: 2,
         steps: [
             GuideStep(
                 anchor: .libraryEditButton,
