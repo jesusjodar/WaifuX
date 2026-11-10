@@ -63,6 +63,7 @@ private struct MigrationStateRecord: Codable {
     let newPath: String
     /// 复制阶段已成功处理的文件数（用于恢复时跳过已复制文件）
     var copiedFileCount: Int
+    let relativePaths: [String]
 }
 
 // MARK: - Service
@@ -73,7 +74,7 @@ private struct MigrationStateRecord: Codable {
 final class DirectoryMigrationService {
     static let shared = DirectoryMigrationService()
 
-    private let stateKey = "migration_state_v1"
+    private let stateKey = "wallhaven_migration_state_v2"
     private(set) var isMigrating = false
     /// 每处理多少个文件回一次进度 + yield（平衡 UI 刷新与调度开销）
     private static let progressStride = 4
@@ -104,7 +105,10 @@ final class DirectoryMigrationService {
             } catch { return .failure(error: error.localizedDescription) }
         }
 
-        guard !isMigrating else { return .failure(error: "目录迁移正在进行，请等待完成") }
+        guard !isMigrating, !CloudSyncService.shared.isSyncing else { return .failure(error: t("migration.busy")) }
+        if WaifuXPreferences.shared.data(forKey: stateKey) != nil, loadMigrationState() == nil {
+            return .failure(error: t("migration.invalidCheckpoint"))
+        }
         let source = oldRoot.resolvingSymlinksInPath().standardizedFileURL.path
         let destination = newRoot.resolvingSymlinksInPath().standardizedFileURL.path
         guard source != destination,
@@ -113,7 +117,13 @@ final class DirectoryMigrationService {
             return .failure(error: "原目录与目标目录不能相同或相互包含")
         }
         isMigrating = true
-        defer { isMigrating = false }
+        let queueToken = await PersistentDownloadQueueService.shared.suspendForLibraryMigration()
+        let applyLease = await WallpaperSchedulerService.shared.beginManualWallpaperApply()
+        defer {
+            WallpaperSchedulerService.shared.completeManualWallpaperApply(lease: applyLease, success: false, screenIDs: [], itemID: nil)
+            PersistentDownloadQueueService.shared.resumeAfterLibraryMigration(queueToken)
+            isMigrating = false
+        }
 
         let oldPath = oldRoot.path
         let newPath = newRoot.path
@@ -125,11 +135,33 @@ final class DirectoryMigrationService {
             fraction: 0,
             handler: progressHandler
         )
-        let filesToMigrate = await Task.detached(priority: .userInitiated) {
-            Self.collectFiles(at: oldRoot)
-        }.value
+        let sourcePaths = registeredOriginalPaths(in: oldRoot)
+        let relativePaths: [String]
+        if let pending = loadMigrationState() {
+            guard pending.oldPath == oldPath, pending.newPath == newPath,
+                  pending.relativePaths.allSatisfy(WallpaperLibraryPath.isMigrationFile) else {
+                return .failure(error: t("migration.invalidCheckpoint"))
+            }
+            relativePaths = pending.relativePaths
+        } else {
+            let derived = await PortraitBlurFillWallpaperService.shared.migrationFiles(
+                for: sourcePaths, in: oldRoot.appendingPathComponent("DerivedWallpapers"))
+            relativePaths = await Task.detached(priority: .userInitiated) {
+                let candidates = sourcePaths.map { URL(fileURLWithPath: $0) } + derived
+                return Array(Set(candidates.compactMap { url -> String? in
+                    guard let relative = Self.relativePath(from: url, base: oldRoot),
+                          WallpaperLibraryPath.isMigrationFile(relative),
+                          let values = try? url.resourceValues(forKeys: [.isRegularFileKey, .isSymbolicLinkKey]),
+                          values.isRegularFile == true, values.isSymbolicLink != true else { return nil }
+                    return relative
+                })).sorted()
+            }.value
+        }
+        let filesToMigrate = relativePaths.map { oldRoot.appendingPathComponent($0) }
         let totalCount = filesToMigrate.count
-        guard totalCount > 0 else {
+        if totalCount == 0 {
+            do { try await updateDownloadRecordPaths(from: oldRoot, to: newRoot, relativePaths: []) }
+            catch { return .failure(error: error.localizedDescription) }
             clearMigrationState()
             return .success(movedFiles: 0, deletedFiles: 0)
         }
@@ -139,7 +171,7 @@ final class DirectoryMigrationService {
             phase: .copying,
             oldPath: oldPath,
             newPath: newPath,
-            copiedFileCount: 0
+            copiedFileCount: 0, relativePaths: relativePaths
         ))
         await reportProgress(
             step: .copying, fileName: "",
@@ -185,7 +217,7 @@ final class DirectoryMigrationService {
         updateCopiedCount(successCount)
 
         // A partial copy is not a committed migration. Keep every library and
-        // playback reference on the readable source until the full copy succeeds.
+        // image reference on the readable source until the full copy succeeds.
         // The destination copies can be reused on retry; the sources stay intact.
         if failCount > 0 {
             clearMigrationState()
@@ -200,7 +232,7 @@ final class DirectoryMigrationService {
         saveMigrationState(MigrationStateRecord(
             phase: .updatingPaths,
             oldPath: oldPath, newPath: newPath,
-            copiedFileCount: successCount
+            copiedFileCount: successCount, relativePaths: relativePaths
         ))
         await reportProgress(
             step: .updatingPaths, fileName: "",
@@ -208,7 +240,12 @@ final class DirectoryMigrationService {
             fraction: MigrationStep.copying.weight,
             handler: progressHandler
         )
-        await updateDownloadRecordPaths(from: oldRoot, to: newRoot)
+        do {
+            try await updateDownloadRecordPaths(from: oldRoot, to: newRoot, relativePaths: Set(relativePaths))
+        } catch {
+            return .partial(successCount: successCount, failCount: totalCount,
+                errors: [error.localizedDescription])
+        }
         await reportProgress(
             step: .updatingPaths, fileName: "",
             processed: 1, total: 1,
@@ -222,7 +259,7 @@ final class DirectoryMigrationService {
         saveMigrationState(MigrationStateRecord(
             phase: .deleting,
             oldPath: oldPath, newPath: newPath,
-            copiedFileCount: successCount
+            copiedFileCount: successCount, relativePaths: relativePaths
         ))
         var deletedCount = 0
         let deleteBase = MigrationStep.copying.weight + MigrationStep.updatingPaths.weight
@@ -256,7 +293,7 @@ final class DirectoryMigrationService {
             handler: progressHandler
         )
         await Task.detached(priority: .userInitiated) {
-            Self.cleanupEmptyDirectories(at: oldRoot)
+            Self.cleanupCopiedDirectories(relativePaths, at: oldRoot)
         }.value
         await reportProgress(
             step: .cleanup, fileName: "",
@@ -282,6 +319,7 @@ final class DirectoryMigrationService {
     func recoverIncompleteMigrationIfNeeded() async {
         guard BackgroundRuntimeRole.isHelper else { return }
         guard let record = loadMigrationState() else { return }
+        guard record.relativePaths.allSatisfy(WallpaperLibraryPath.isMigrationFile) else { return }
 
         let oldURL = URL(fileURLWithPath: record.oldPath)
         let newURL = URL(fileURLWithPath: record.newPath)
@@ -295,7 +333,6 @@ final class DirectoryMigrationService {
             // 策略：不清除 customRoot（因为新下载可能已写入新目录），
             //       而是重新执行一次完整迁移（复制是幂等的）
             print("[DirectoryMigrationService] Recovering incomplete migration (phase=\(record.phase.rawValue)), re-running migration")
-            clearMigrationState()
             _ = await migrate(from: oldURL, to: newURL, progressHandler: { _ in })
 
         case .deleting:
@@ -305,7 +342,7 @@ final class DirectoryMigrationService {
             // The destination can disappear between sessions (for example an
             // unplugged drive). Verify each copy before deleting its source.
             print("[DirectoryMigrationService] Resuming deletion of old files at \(record.oldPath)")
-            if await Self.deleteFilesAsync(at: oldURL, verifiedAgainst: newURL) {
+            if await Self.deleteFilesAsync(record.relativePaths, at: oldURL, verifiedAgainst: newURL) {
                 clearMigrationState()
             } else {
                 print("[DirectoryMigrationService] Recovery kept source files and checkpoint: destination copy missing or different")
@@ -328,36 +365,23 @@ final class DirectoryMigrationService {
         let newPath = currentRoot.path
         guard oldPath != newPath else { return }
 
-        var needsRepair = false
-        if !needsRepair {
-            for record in WallpaperLibraryService.shared.downloadRecords {
-                if record.localFilePath.hasPrefix(oldPath) { needsRepair = true; break }
-                if Self.pathString(record.wallpaper.url).hasPrefix(oldPath) || Self.pathString(record.wallpaper.path).hasPrefix(oldPath) {
-                    needsRepair = true; break
-                }
-            }
+        let records = WallpaperLibraryService.shared.downloadRecords.filter { $0.isActive }
+        let recovered = records.compactMap { record -> (String, String)? in
+            guard !FileManager.default.fileExists(atPath: record.localFilePath),
+                  let next = WallpaperLibraryPath.rebase(record.localFilePath, from: oldPath, to: newPath),
+                  FileManager.default.fileExists(atPath: next),
+                  let relative = Self.relativePath(from: URL(fileURLWithPath: record.localFilePath), base: defaultRoot),
+                  WallpaperLibraryPath.isMigrationFile(relative) else { return nil }
+            return (record.wallpaper.id, relative)
         }
-        if !needsRepair {
+        guard !recovered.isEmpty else { return }
+        do {
+            try await updateDownloadRecordPaths(from: defaultRoot, to: currentRoot,
+                relativePaths: Set(recovered.map { $0.1 }), wallpaperIDs: Set(recovered.map { $0.0 }))
+            print("[DirectoryMigrationService] Orphaned path repair completed")
+        } catch {
+            print("[DirectoryMigrationService] Orphaned path repair incomplete; originals retained: \(error)")
         }
-        if !needsRepair {
-            for record in WallpaperLibraryService.shared.favoriteRecords {
-                if Self.pathString(record.wallpaper.url).hasPrefix(oldPath) || Self.pathString(record.wallpaper.path).hasPrefix(oldPath) {
-                    needsRepair = true; break
-                }
-            }
-        }
-
-        guard needsRepair else { return }
-
-        print("[DirectoryMigrationService] Repairing orphaned paths: \(oldPath) -> \(newPath)")
-        WallpaperLibraryService.shared.bulkUpdateDownloadPaths(oldPrefix: oldPath, newPrefix: newPath)
-        await PortraitBlurFillWallpaperService.shared.rebaseArtifacts(
-            from: defaultRoot,
-            to: currentRoot,
-            derivedWallpapersDirectory: currentRoot
-                .appendingPathComponent("DerivedWallpapers", isDirectory: true)
-        )
-        print("[DirectoryMigrationService] Orphaned path repair completed")
     }
 
     // MARK: - 数据修复
@@ -498,17 +522,35 @@ final class DirectoryMigrationService {
 
     // MARK: - Private
 
-    private func updateDownloadRecordPaths(from oldRoot: URL, to newRoot: URL) async {
-        let oldPath = oldRoot.path
-        let newPath = newRoot.path
-        WallpaperLibraryService.shared.bulkUpdateDownloadPaths(oldPrefix: oldPath, newPrefix: newPath)
-        await PortraitBlurFillWallpaperService.shared.rebaseArtifacts(
-            from: URL(fileURLWithPath: oldPath),
-            to: URL(fileURLWithPath: newPath),
-            derivedWallpapersDirectory: URL(fileURLWithPath: newPath)
-                .appendingPathComponent("DerivedWallpapers", isDirectory: true)
-        )
-        print("[DirectoryMigrationService] Updated all persisted paths: \(oldPath) -> \(newPath)")
+    private func updateDownloadRecordPaths(from oldRoot: URL, to newRoot: URL, relativePaths: Set<String>, wallpaperIDs: Set<String>? = nil) async throws {
+        let library = WallpaperLibraryService.shared
+        let oldPaths = registeredOriginalPaths(in: oldRoot, wallpaperIDs: wallpaperIDs).union(relativePaths.compactMap { relative -> String? in
+            guard WallhavenLibraryFilePolicy.wallpaperID(relativePath: relative) != nil else { return nil }
+            return oldRoot.appendingPathComponent(relative).path
+        })
+        try await PortraitBlurFillWallpaperService.shared.migrateArtifacts(from: oldRoot, to: newRoot, sourcePaths: oldPaths)
+        library.bulkUpdateDownloadPaths(oldPrefix: oldRoot.path, newPrefix: newRoot.path, wallpaperIDs: wallpaperIDs)
+        guard library.verifyPersistedRecords() else {
+            throw NSError(domain: "StaticWallpaperMigration", code: 1,
+                userInfo: [NSLocalizedDescriptionKey: t("migration.metadataWriteFailed")])
+        }
+        try DesktopWallpaperSyncManager.shared.rebaseLibraryPaths(from: oldRoot, to: newRoot, relativePaths: relativePaths)
+        GlobalWallpaperSyncCoordinator.shared.rebaseLibraryPath(from: oldRoot, to: newRoot)
+    }
+
+    private func registeredOriginalPaths(in root: URL, wallpaperIDs: Set<String>? = nil) -> Set<String> {
+        let library = WallpaperLibraryService.shared
+        var paths = Set<String>()
+        func add(_ path: String, wallpaper: Wallpaper) {
+            guard (wallpaperIDs?.contains(wallpaper.id) ?? true), path.hasPrefix("/"),
+                  WallhavenContentPolicy.isWallpaperRecord(id: wallpaper.id, detailURL: wallpaper.url, imagePath: wallpaper.path),
+                  WallhavenLibraryFilePolicy.originalFilename(id: wallpaper.id, recordedPath: path) != nil,
+                  Self.relativePath(from: URL(fileURLWithPath: path), base: root) != nil else { return }
+            paths.insert(path)
+        }
+        for record in library.downloadRecords where record.isActive { add(record.localFilePath, wallpaper: record.wallpaper) }
+        for record in library.favoriteRecords where record.isActive { add(record.wallpaper.path, wallpaper: record.wallpaper) }
+        return paths
     }
 
     /// 回到 MainActor 推送进度；async 调用点会在此让出 run loop，SwiftUI 才能刷新。
@@ -559,22 +601,24 @@ final class DirectoryMigrationService {
     }
 
     /// 后台异步删除目录下所有文件（不阻塞主线程）
-    private nonisolated static func deleteFilesAsync(at root: URL, verifiedAgainst destination: URL) async -> Bool {
-        let files = collectFiles(at: root)
-        let stride = 16
+    private nonisolated static func deleteFilesAsync(_ relativePaths: [String], at root: URL, verifiedAgainst destination: URL) async -> Bool {
+        let fm = FileManager.default
+        let allowed = relativePaths.filter(WallpaperLibraryPath.isMigrationFile)
+        guard allowed.count == relativePaths.count else { return false }
         var complete = true
-        for start in Swift.stride(from: 0, to: files.count, by: stride) {
-            let end = min(start + stride, files.count)
-            let batch = Array(files[start..<end])
-            let deleted = await Task.detached(priority: .utility) {
-                Self.deleteVerifiedBatch(batch, from: root, verifiedAgainst: destination)
+        for relative in allowed {
+            let source = root.appendingPathComponent(relative)
+            let target = destination.appendingPathComponent(relative)
+            if !fm.fileExists(atPath: source.path) {
+                if !fm.fileExists(atPath: target.path) { complete = false }
+                continue
+            }
+            let count = await Task.detached(priority: .utility) {
+                Self.deleteVerifiedBatch([source], from: root, verifiedAgainst: destination)
             }.value
-            if deleted != batch.count { complete = false }
-            await Task.yield()
+            if count != 1 { complete = false }
         }
-        await Task.detached(priority: .utility) {
-            Self.cleanupEmptyDirectories(at: root)
-        }.value
+        await Task.detached(priority: .utility) { Self.cleanupCopiedDirectories(allowed, at: root) }.value
         return complete
     }
 
@@ -586,7 +630,7 @@ final class DirectoryMigrationService {
         let fm = FileManager.default
         var outcome = CopyBatchOutcome()
         for sourceURL in sources {
-            guard let relative = relativePath(from: sourceURL, base: oldRoot) else {
+            guard let relative = relativePath(from: sourceURL, base: oldRoot), WallpaperLibraryPath.isMigrationFile(relative) else {
                 outcome.failCount += 1
                 outcome.errors.append("\(sourceURL.lastPathComponent): 文件不属于原目录")
                 continue
@@ -598,10 +642,24 @@ final class DirectoryMigrationService {
                 if !fm.fileExists(atPath: destDir.path) {
                     try fm.createDirectory(at: destDir, withIntermediateDirectories: true)
                 }
-                if fm.fileExists(atPath: destURL.path) {
-                    try fm.removeItem(at: destURL)
+                guard relativePath(from: destURL, base: newRoot) == relative else {
+                    throw NSError(domain: "StaticWallpaperMigration", code: 2,
+                        userInfo: [NSLocalizedDescriptionKey: t("migration.invalidTarget")])
                 }
-                try fm.copyItem(at: sourceURL, to: destURL)
+                if fm.fileExists(atPath: destURL.path) {
+                    guard fm.contentsEqual(atPath: sourceURL.path, andPath: destURL.path) else {
+                        throw NSError(domain: "StaticWallpaperMigration", code: 3,
+                            userInfo: [NSLocalizedDescriptionKey: t("migration.targetConflict")])
+                    }
+                } else {
+                    let temporary = destDir.appendingPathComponent(".wallhaven-migrate-\(UUID().uuidString)")
+                    defer { try? fm.removeItem(at: temporary) }
+                    try fm.copyItem(at: sourceURL, to: temporary)
+                    guard fm.contentsEqual(atPath: sourceURL.path, andPath: temporary.path) else {
+                        throw CocoaError(.fileReadCorruptFile)
+                    }
+                    try fm.moveItem(at: temporary, to: destURL)
+                }
                 outcome.successCount += 1
             } catch {
                 outcome.failCount += 1
@@ -618,7 +676,7 @@ final class DirectoryMigrationService {
         let fm = FileManager.default
         var deleted = 0
         for sourceURL in sources {
-            guard let relative = relativePath(from: sourceURL, base: root) else { continue }
+            guard let relative = relativePath(from: sourceURL, base: root), WallpaperLibraryPath.isMigrationFile(relative) else { continue }
             let target = destination.appendingPathComponent(relative)
             guard relativePath(from: target, base: destination) == relative,
                   let sourceValues = try? sourceURL.resourceValues(forKeys: [.isRegularFileKey, .isSymbolicLinkKey]),
@@ -636,25 +694,7 @@ final class DirectoryMigrationService {
         return deleted
     }
 
-    nonisolated private static func collectFiles(at root: URL) -> [URL] {
-        let fm = FileManager.default
-        var files: [URL] = []
-        guard fm.fileExists(atPath: root.path) else { return files }
-        if let enumerator = fm.enumerator(
-            at: root,
-            includingPropertiesForKeys: [.isRegularFileKey],
-            options: [.skipsHiddenFiles]
-        ) {
-            for case let url as URL in enumerator {
-                if url.lastPathComponent == ".DS_Store" { continue }
-                if let isFile = try? url.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile,
-                   isFile == true {
-                    files.append(url)
-                }
-            }
-        }
-        return files
-    }
+
 
     nonisolated private static func relativePath(from url: URL, base: URL) -> String? {
         // Directory enumeration may return /private/var while the selected root
@@ -668,30 +708,23 @@ final class DirectoryMigrationService {
         return nil
     }
 
-    nonisolated private static func cleanupEmptyDirectories(at root: URL) {
+    nonisolated private static func cleanupCopiedDirectories(_ relativePaths: [String], at root: URL) {
         let fm = FileManager.default
-        guard fm.fileExists(atPath: root.path) else { return }
-        func cleanup(_ url: URL) {
-            guard let values = try? url.resourceValues(forKeys: [.isDirectoryKey, .isSymbolicLinkKey]),
-                  values.isDirectory == true, values.isSymbolicLink != true else { return }
-            do {
-                let contents = try fm.contentsOfDirectory(atPath: url.path)
-                for name in contents {
-                    let child = url.appendingPathComponent(name)
-                    var isDir: ObjCBool = false
-                    if fm.fileExists(atPath: child.path, isDirectory: &isDir), isDir.boolValue {
-                        cleanup(child)
-                    }
-                }
-                let remaining = try fm.contentsOfDirectory(atPath: url.path)
-                if remaining.isEmpty {
-                    try fm.removeItem(at: url)
-                }
-            } catch {
-                print("[DirectoryMigrationService] Cleanup error at \(url.path): \(error)")
+        var directories = Set<URL>()
+        for relative in relativePaths {
+            var directory = root.appendingPathComponent(relative).deletingLastPathComponent()
+            while Self.relativePath(from: directory, base: root) != nil {
+                directories.insert(directory)
+                directory.deleteLastPathComponent()
             }
         }
-        cleanup(root)
+        directories.insert(root)
+        for directory in directories.sorted(by: { $0.path.count > $1.path.count }) {
+            guard let values = try? directory.resourceValues(forKeys: [.isDirectoryKey, .isSymbolicLinkKey]),
+                  values.isDirectory == true, values.isSymbolicLink != true,
+                  (try? fm.contentsOfDirectory(atPath: directory.path).isEmpty) == true else { continue }
+            try? fm.removeItem(at: directory)
+        }
     }
 
     private static func pathString(_ string: String) -> String {

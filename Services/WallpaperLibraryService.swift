@@ -328,15 +328,15 @@ final class WallpaperLibraryService: ObservableObject {
     }
 
     /// 批量替换下载记录和收藏记录中的路径前缀（用于目录迁移）
-    func bulkUpdateDownloadPaths(oldPrefix: String, newPrefix: String) {
-        if BackgroundRuntimeRole.isRemoteUI { BackgroundRuntimeBridge.send("library.wallpaper.bulkUpdateDownloadPaths0", ["oldPrefix": oldPrefix, "newPrefix": newPrefix]); return }
+    func bulkUpdateDownloadPaths(oldPrefix: String, newPrefix: String, wallpaperIDs: Set<String>? = nil) {
+        if BackgroundRuntimeRole.isRemoteUI { BackgroundRuntimeBridge.send("library.wallpaper.bulkUpdateDownloadPaths0", ["oldPrefix": oldPrefix, "newPrefix": newPrefix, "wallpaperIDs": wallpaperIDs.map(Array.init)]); return }
 
         var changed = false
         // 更新下载记录
         for index in downloadRecords.indices {
+            guard wallpaperIDs?.contains(downloadRecords[index].wallpaper.id) ?? true else { continue }
             let oldPath = downloadRecords[index].localFilePath
-            if oldPath.hasPrefix(oldPrefix) {
-                let newPath = newPrefix + String(oldPath.dropFirst(oldPrefix.count))
+            if let newPath = WallpaperLibraryPath.rebase(oldPath, from: oldPrefix, to: newPrefix) {
                 downloadRecords[index].localFilePath = newPath
                 changed = true
             }
@@ -350,6 +350,7 @@ final class WallpaperLibraryService: ObservableObject {
         // 更新收藏记录（封面图和详情背景同样使用 wallpaper 内部路径）
         var favoritesChanged = false
         for index in favoriteRecords.indices {
+            guard wallpaperIDs?.contains(favoriteRecords[index].wallpaper.id) ?? true else { continue }
             var wallpaper = favoriteRecords[index].wallpaper
             if updateWallpaperPaths(&wallpaper, oldPrefix: oldPrefix, newPrefix: newPrefix) {
                 favoriteRecords[index].wallpaper = wallpaper
@@ -392,19 +393,7 @@ final class WallpaperLibraryService: ObservableObject {
 
     /// 替换路径前缀；支持 file:// 前缀和普通路径
     private static func replacePathPrefix(_ path: String, oldPrefix: String, newPrefix: String) -> String? {
-        // 处理 file:// 前缀的路径
-        if let url = URL(string: path), url.isFileURL {
-            let filePath = url.path
-            if filePath.hasPrefix(oldPrefix) {
-                let newPath = newPrefix + String(filePath.dropFirst(oldPrefix.count))
-                return URL(fileURLWithPath: newPath).absoluteString
-            }
-        }
-        // 普通路径匹配
-        if path.hasPrefix(oldPrefix) {
-            return newPrefix + String(path.dropFirst(oldPrefix.count))
-        }
-        return nil
+        WallpaperLibraryPath.rebaseURLString(path, from: oldPrefix, to: newPrefix)
     }
 
     // MARK: - 壁纸批量删除
@@ -775,6 +764,13 @@ final class WallpaperLibraryService: ObservableObject {
         }
         if favFixed { rebuildFavCache() }
         if dlFixed { rebuildDlCache() }
+    }
+
+    func verifyPersistedRecords() -> Bool {
+        Set(cache.loadIndex(key: "index/\(dlCategory)")) == Set(downloadRecords.map(\.id))
+          && Set(cache.loadIndex(key: "index/\(favCategory)")) == Set(favoriteRecords.map(\.id))
+          && downloadRecords.allSatisfy { cache.load(WallpaperDownloadRecord.self, key: "\(dlCategory)/\($0.id)") == $0 }
+          && favoriteRecords.allSatisfy { cache.load(WallpaperFavoriteRecord.self, key: "\(favCategory)/\($0.id)") == $0 }
     }
 
     /// 外部调用入口：批量重建下载 Cache（由 DirectoryMigrationService 等调用）

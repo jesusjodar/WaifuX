@@ -147,6 +147,15 @@ enum WallhavenStaticCoreTests {
         var metadata = SyncMetadata(recordID: "test", entityType: "wallpaper", updatedAt: Date(timeIntervalSince1970: 10), isDeleted: true)
         metadata.markSynced(at: Date(timeIntervalSince1970: 20))
         precondition(metadata.updatedAt == Date(timeIntervalSince1970: 10) && metadata.isDeleted && metadata.lastSyncedAt == Date(timeIntervalSince1970: 20))
+        precondition(WallpaperLibraryPath.rebase("/library/Wallpapers/abc123.jpg", from: "/library", to: "/new") == "/new/Wallpapers/abc123.jpg")
+        precondition(WallpaperLibraryPath.rebase("/library-sibling/abc123.jpg", from: "/library", to: "/new") == nil)
+        precondition(WallpaperLibraryPath.rebaseURLString("https://wallhaven.cc/w/abc123", from: "/library", to: "/new") == nil)
+        precondition(WallpaperLibraryPath.rebaseURLString("file:///library/a%20b.jpg", from: "/library", to: "/new") == "file:///new/a%20b.jpg")
+        precondition(WallpaperLibraryPath.isMigrationFile("Wallpapers/wallhaven-abc123.jpg"))
+        precondition(WallpaperLibraryPath.isMigrationFile("DerivedWallpapers/PortraitBlurFill/blur-fill-" + String(repeating: "f", count: 32) + ".jpg"))
+        precondition(!WallpaperLibraryPath.isMigrationFile("DerivedWallpapers/PortraitBlurFill/mapping.json"))
+        precondition(!WallpaperLibraryPath.isMigrationFile("Media/wallhaven-abc123.jpg"))
+        precondition(!WallpaperLibraryPath.isMigrationFile("Wallpapers/../wallhaven-abc123.jpg"))
         for dimensions in [(7680.0, 4320.0), (50000, 100000), (1, 1000000)] {
             for bytes in [4, 8, 16] {
                 let layout = WallpaperSnapshotPixelBudget.layout(width: dimensions.0, height: dimensions.1, decodedBytesPerPixel: bytes)!

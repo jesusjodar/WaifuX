@@ -46,6 +46,14 @@ final class GlobalWallpaperSyncCoordinator {
     return try await withTaskCancellationHandler(
       operation: { try await task.value }, onCancel: { task.cancel() })
   }
+  func rebaseLibraryPath(from oldRoot: URL, to newRoot: URL) {
+    guard let snapshot = lastSuccessfulApply,
+      let next = WallpaperLibraryPath.rebase(snapshot.localPath, from: oldRoot.path, to: newRoot.path),
+      FileManager.default.fileExists(atPath: next),
+      WallpaperLibraryService.shared.downloadRecord(forLocalFilePath: next) != nil,
+      let data = try? JSONEncoder().encode(Snapshot(localPath: next)) else { return }
+    WaifuXPreferences.shared.set(data, forKey: stateKey)
+  }
   func prepareForProcessExit() {
     isStopping = true
     for task in requests.values { task.cancel() }

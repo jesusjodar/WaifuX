@@ -36,6 +36,7 @@ enum LocalWallpaperApplyService {
             "options": try JSONEncoder().encode(options),
           ])["success"] as? Bool) ?? false
     }
+    guard !DirectoryMigrationService.shared.isMigrating else { throw ApplyError.failed(t("migration.busy")) }
     let scheduler = WallpaperSchedulerService.shared
     let isManual = options.reason != "static-rotation" && options.reason != "static-recovery" && !options.isGlobalTransaction
     let lease = isManual ? await scheduler.beginManualWallpaperApply() : nil

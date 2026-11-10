@@ -141,4 +141,6 @@ Tools/MobilePush/__pycache__/
 
 !/Tests/WallhavenCloudIntegrationProbe.swift
 
-!scripts/test-wallhaven-cloud-integration.py
+!scripts/test-wallhaven-helper-integration.py
+
+!/Tests/WallhavenMigrationIntegrationProbe.swift

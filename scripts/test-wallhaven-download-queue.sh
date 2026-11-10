@@ -14,7 +14,7 @@ swiftc -swift-version 6 -D WAIFUX_HELPER -parse-as-library \
   "$repo_root/Services/DownloadTaskService.swift" \
   "$repo_root/Services/UserLibrary.swift" \
   "$repo_root/Tests/WallhavenDownloadQueueTests.swift" -o "$test_dir/queue-tests"
-for mode in lifecycle migration corrupt; do
+for mode in lifecycle migration corrupt suspend-startup; do
   WAIFUX_HELPER_TEST_ROOT="$test_dir/$mode" WAIFUX_HELPER_TEST_SUITE="waifux-queue-test-$(uuidgen)" \
     "$test_dir/queue-tests" "$mode"
 done

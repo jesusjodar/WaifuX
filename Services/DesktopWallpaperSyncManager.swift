@@ -89,6 +89,52 @@ final class DesktopWallpaperSyncManager {
         loadOriginalFingerprintState()
     }
 
+    /// Rebind only files actually copied by the static migration. The prior
+    /// system wallpaper is untouched unless it was one of those same files.
+    func rebaseLibraryPaths(from oldRoot: URL, to newRoot: URL, relativePaths: Set<String>) throws {
+        let moved = Set(relativePaths.map { oldRoot.appendingPathComponent($0).standardizedFileURL.resolvingSymlinksInPath().path })
+        func rebased(_ url: URL) -> URL {
+            guard url.isFileURL, moved.contains(url.standardizedFileURL.resolvingSymlinksInPath().path),
+                  let path = WallpaperLibraryPath.rebase(url.path, from: oldRoot.path, to: newRoot.path) else { return url }
+            return URL(fileURLWithPath: path)
+        }
+        var changedScreens: [(NSScreen, URL, [NSWorkspace.DesktopImageOptionKey: Any])] = []
+        if BackgroundRuntimeRole.allowsDesktopRendering {
+            do {
+                for screen in NSScreen.screens {
+                    guard let owned = imageURL(for: screen), moved.contains(owned.standardizedFileURL.resolvingSymlinksInPath().path),
+                          let current = NSWorkspace.shared.desktopImageURL(for: screen),
+                          current.standardizedFileURL == owned.standardizedFileURL else { continue }
+                    let next = rebased(owned)
+                    let options = NSWorkspace.shared.desktopImageOptions(for: screen) ?? [:]
+                    try NSWorkspace.shared.setDesktopImageURLForAllSpaces(next, for: screen, options: options)
+                    changedScreens.append((screen, current, options))
+                }
+            } catch {
+                for (screen, url, options) in changedScreens.reversed() {
+                    try? NSWorkspace.shared.setDesktopImageURLForAllSpaces(url, for: screen, options: options)
+                }
+                throw error
+            }
+        }
+        lastSetImageURLByScreen = lastSetImageURLByScreen.mapValues(rebased)
+        lastSetImageURLByFingerprint = lastSetImageURLByFingerprint.mapValues(rebased)
+        originalImageURLByFingerprint = originalImageURLByFingerprint.mapValues(rebased)
+        var sources: [String: String] = [:]
+        for (image, source) in sourcePathByImagePath {
+            let nextImage = rebased(URL(fileURLWithPath: image)).path
+            let sourceWasMoved = moved.contains(URL(fileURLWithPath: source).standardizedFileURL.resolvingSymlinksInPath().path)
+            let imageWasMoved = nextImage != image
+            let nextSource = sourceWasMoved || imageWasMoved
+                ? WallpaperLibraryPath.rebase(source, from: oldRoot.path, to: newRoot.path) ?? source : source
+            sources[nextImage] = nextSource
+        }
+        sourcePathByImagePath = sources
+        WaifuXPreferences.shared.set(sources, forKey: "desktop_wallpaper_static_sources_v1")
+        persistOriginalFingerprintState()
+        persistFingerprintState()
+    }
+
     func backgroundSnapshot() -> [String: Any] {
         ["screens": lastSetImageURLByScreen.mapValues(\.absoluteString), "fingerprints": lastSetImageURLByFingerprint.mapValues(\.absoluteString)]
     }

@@ -152,44 +152,51 @@ actor PortraitBlurFillWallpaperService {
         try? persistArtifacts(to: mappingURL)
     }
 
-    /// 下载根目录迁移后，修复 copied mapping.json 中的绝对路径与缓存键。
-    func rebaseArtifacts(
-        from oldRoot: URL,
-        to newRoot: URL,
-        derivedWallpapersDirectory: URL
-    ) {
-        let artifactDirectory = derivedWallpapersDirectory
-            .appendingPathComponent(Self.artifactDirectoryName, isDirectory: true)
-        let mappingURL = artifactDirectory.appendingPathComponent(Self.mappingFileName)
-        guard (try? loadArtifactsIfNeeded(from: mappingURL)) != nil else { return }
-
-        var rebased: [String: Artifact] = [:]
-        for artifact in artifacts.values {
-            var next = artifact
-            next.sourcePath = Self.rebasedPath(
-                artifact.sourcePath,
-                from: oldRoot.path,
-                to: newRoot.path
-            )
-            next.outputPath = Self.rebasedPath(
-                artifact.outputPath,
-                from: oldRoot.path,
-                to: newRoot.path
-            )
-            next.sourceFingerprint = Self.rebasedPath(
-                artifact.sourceFingerprint,
-                from: oldRoot.path,
-                to: newRoot.path
-            )
-            let key = Self.artifactKey(
-                sourceFingerprint: next.sourceFingerprint,
-                targetWidth: next.targetWidth,
-                targetHeight: next.targetHeight
-            )
-            rebased[key] = next
+    /// Only artifacts whose original belongs to a registered Wallhaven record
+    /// may participate in a directory move. Old mapping documents stay intact.
+    func migrationFiles(for sourcePaths: Set<String>, in derivedDirectory: URL) -> [URL] {
+        let directory = derivedDirectory.appendingPathComponent(Self.artifactDirectoryName, isDirectory: true)
+        guard (try? loadArtifactsIfNeeded(from: directory.appendingPathComponent(Self.mappingFileName))) != nil else { return [] }
+        let canonicalSources = Set(sourcePaths.map { URL(fileURLWithPath: $0).standardizedFileURL.resolvingSymlinksInPath().path })
+        return artifacts.values.compactMap { artifact in
+            guard canonicalSources.contains(URL(fileURLWithPath: artifact.sourcePath).standardizedFileURL.resolvingSymlinksInPath().path) else { return nil }
+            let output = URL(fileURLWithPath: artifact.outputPath)
+            let filename = output.lastPathComponent
+            let relative = "DerivedWallpapers/PortraitBlurFill/" + filename
+            guard WallpaperLibraryPath.isMigrationFile(relative),
+                  output.standardizedFileURL.resolvingSymlinksInPath().path
+                    == directory.appendingPathComponent(filename).standardizedFileURL.resolvingSymlinksInPath().path,
+                  FileManager.default.fileExists(atPath: output.path) else { return nil }
+            return output
         }
-        artifacts = rebased
-        try? persistArtifacts(to: mappingURL)
+    }
+
+    func migrateArtifacts(from oldRoot: URL, to newRoot: URL, sourcePaths: Set<String>) throws {
+        let oldDirectory = oldRoot.appendingPathComponent("DerivedWallpapers").appendingPathComponent(Self.artifactDirectoryName)
+        let oldMapping = oldDirectory.appendingPathComponent(Self.mappingFileName)
+        guard FileManager.default.fileExists(atPath: oldMapping.path) else { return }
+        try loadArtifactsIfNeeded(from: oldMapping)
+        let previous = artifacts
+        let newDirectory = newRoot.appendingPathComponent("DerivedWallpapers").appendingPathComponent(Self.artifactDirectoryName)
+        let newMapping = newDirectory.appendingPathComponent(Self.mappingFileName)
+        try loadArtifactsIfNeeded(from: newMapping)
+        let canonicalSources = Set(sourcePaths.map { URL(fileURLWithPath: $0).standardizedFileURL.resolvingSymlinksInPath().path })
+        for artifact in previous.values where canonicalSources.contains(URL(fileURLWithPath: artifact.sourcePath).standardizedFileURL.resolvingSymlinksInPath().path) {
+            let filename = URL(fileURLWithPath: artifact.outputPath).lastPathComponent
+            guard URL(fileURLWithPath: artifact.outputPath).standardizedFileURL.resolvingSymlinksInPath()
+                    == oldDirectory.appendingPathComponent(filename).standardizedFileURL.resolvingSymlinksInPath(),
+                  let sourcePath = WallpaperLibraryPath.rebase(artifact.sourcePath, from: oldRoot.path, to: newRoot.path),
+                  let outputPath = WallpaperLibraryPath.rebase(artifact.outputPath, from: oldRoot.path, to: newRoot.path),
+                  WallpaperLibraryPath.isMigrationFile("DerivedWallpapers/PortraitBlurFill/" + URL(fileURLWithPath: outputPath).lastPathComponent),
+                  FileManager.default.fileExists(atPath: outputPath) else { continue }
+            var next = artifact
+            next.sourcePath = sourcePath
+            next.outputPath = outputPath
+            next.sourceFingerprint = Self.rebasedPath(artifact.sourceFingerprint, from: oldRoot.path, to: newRoot.path)
+            let key = Self.artifactKey(sourceFingerprint: next.sourceFingerprint, targetWidth: next.targetWidth, targetHeight: next.targetHeight)
+            if artifacts[key].map({ FileManager.default.fileExists(atPath: $0.outputPath) }) != true { artifacts[key] = next }
+        }
+        try persistArtifacts(to: newMapping)
     }
 
     private func loadArtifactsIfNeeded(from mappingURL: URL) throws {
@@ -197,8 +204,8 @@ actor PortraitBlurFillWallpaperService {
             return
         }
 
-        loadedMappingURL = mappingURL
         guard FileManager.default.fileExists(atPath: mappingURL.path) else {
+            loadedMappingURL = mappingURL
             artifacts = [:]
             return
         }
@@ -206,6 +213,7 @@ actor PortraitBlurFillWallpaperService {
         let data = try Data(contentsOf: mappingURL)
         let document = try JSONDecoder().decode(MappingDocument.self, from: data)
         artifacts = document.version == Self.rendererVersion ? document.artifacts : [:]
+        loadedMappingURL = mappingURL
     }
 
     private func persistArtifacts(to mappingURL: URL) throws {
@@ -266,10 +274,7 @@ actor PortraitBlurFillWallpaperService {
         from oldPrefix: String,
         to newPrefix: String
     ) -> String {
-        guard value == oldPrefix || value.hasPrefix(oldPrefix + "/") else {
-            return value
-        }
-        return newPrefix + String(value.dropFirst(oldPrefix.count))
+        WallpaperLibraryPath.rebase(value, from: oldPrefix, to: newPrefix) ?? value
     }
 
     private nonisolated static func render(_ request: RenderRequest) throws {
@@ -355,7 +360,8 @@ actor PortraitBlurFillWallpaperService {
             .cropped(to: targetRect)
 
         let context = CIContext(options: [.workingColorSpace: NSNull()])
-        guard let renderedImage = context.createCGImage(finalImage, from: targetRect) else {
+        guard let outputColorSpace = CGColorSpace(name: CGColorSpace.sRGB),
+              let renderedImage = context.createCGImage(finalImage, from: targetRect, format: .RGBA8, colorSpace: outputColorSpace) else {
             throw NSError(
                 domain: "PortraitBlurFillWallpaper",
                 code: 6,

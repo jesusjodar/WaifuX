@@ -739,7 +739,7 @@ final class PersistentDownloadQueueService {
 
   /// 动态 worker pool：任意槽位结束后立即取下一个 FIFO Job。
   private func pump() {
-    guard !isStopping, wallpaperViewModel != nil else { return }
+    guard !isStopping, migrationSuspensions.isEmpty, wallpaperViewModel != nil else { return }
     while activeWorkers.count < maxConcurrentDownloads,
       let index = jobs.firstIndex(where: { $0.state == .queued && activeWorkers[$0.id] == nil })
     {
@@ -909,6 +909,7 @@ final class PersistentDownloadQueueService {
 
   private var checkpointIsCorrupt = false
   private var isStopping = false
+  private var migrationSuspensions = Set<UUID>()
 
   private func loadSnapshotJobs() -> [Job] {
     let oldURL = checkpointURL.deletingLastPathComponent().appendingPathComponent(
@@ -929,6 +930,31 @@ final class PersistentDownloadQueueService {
         metadata: ["path": source.path, "error": error.localizedDescription])
       return []
     }
+  }
+
+  /// Drain file writers without losing waiters or the user's pause state.
+  func suspendForLibraryMigration() async -> UUID {
+    if !didRestore {
+      didRestore = true
+      restoreAndMigrateJobs()
+    }
+    let token = UUID()
+    migrationSuspensions.insert(token)
+    let workers = activeWorkers
+    for (jobID, worker) in workers {
+      if let index = jobs.firstIndex(where: { $0.id == jobID }), jobs[index].state == .running {
+        jobs[index].state = .queued
+        DownloadTaskService.shared.markPending(id: jobID)
+      }
+      worker.task.cancel()
+    }
+    _ = persistJobs()
+    for worker in workers.values { _ = await worker.task.result }
+    return token
+  }
+  func resumeAfterLibraryMigration(_ token: UUID) {
+    guard migrationSuspensions.remove(token) != nil else { return }
+    pump()
   }
 
   func prepareForProcessTermination() {

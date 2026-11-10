@@ -686,7 +686,8 @@
         return [:]
       case "library.wallpaper.bulkUpdateDownloadPaths0":
         try WallpaperLibraryService.shared.bulkUpdateDownloadPaths(
-          oldPrefix: try a.string("oldPrefix"), newPrefix: try a.string("newPrefix"))
+          oldPrefix: try a.string("oldPrefix"), newPrefix: try a.string("newPrefix"),
+          wallpaperIDs: (a.values["wallpaperIDs"] as? [String]).map { Set($0) })
         return [:]
       case "library.wallpaper.moveItemsToRoot0":
         try WallpaperLibraryService.shared.moveItemsToRoot(fromFolder: try a.string("folderID"))

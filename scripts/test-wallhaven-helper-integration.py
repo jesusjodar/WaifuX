@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run the Debug helper's real cloud services against isolated local/WebDAV fixtures."""
+"""Run the Debug helper's real cloud and migration services against isolated fixtures."""
 import functools
 import http.server
 import os
@@ -12,7 +12,7 @@ import uuid
 
 
 def run(helper, mode):
-    suite = 'waifux-cloud-integration-' + str(uuid.uuid4())
+    suite = ('waifux-migration-integration-' if mode == 'migration' else 'waifux-cloud-integration-') + str(uuid.uuid4())
     requests = []
     server = None
     server_thread = None
@@ -60,7 +60,8 @@ def run(helper, mode):
             server_thread.start()
             env['WAIFUX_TEST_WEBDAV_URL'] = f'http://127.0.0.1:{server.server_port}/'
         try:
-            result = subprocess.run([str(helper), '--wallhaven-cloud-regression'], env=env,
+            command = '--wallhaven-migration-regression' if mode == 'migration' else '--wallhaven-cloud-regression'
+            result = subprocess.run([str(helper), command], env=env,
                                     stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                                     text=True, timeout=90)
             print(f'[{mode}] {result.stdout.strip()}', flush=True)
@@ -82,7 +83,7 @@ def run(helper, mode):
 
 if __name__ == '__main__':
     if len(sys.argv) != 2:
-        sys.exit('Usage: test-wallhaven-cloud-integration.py /path/to/Debug/WaifuXHelper.app/Contents/MacOS/WaifuXHelper')
+        sys.exit('Usage: test-wallhaven-helper-integration.py /path/to/Debug/WaifuXHelper.app/Contents/MacOS/WaifuXHelper')
     helper = Path(sys.argv[1]).resolve(strict=True)
-    for mode in ['local', 'webdav']:
+    for mode in ['local', 'webdav', 'migration']:
         run(helper, mode)

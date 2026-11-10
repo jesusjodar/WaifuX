@@ -43,6 +43,10 @@ final class CloudSyncService: ObservableObject {
             lastError = CloudSyncError.syncInProgress
             return
         }
+        guard !DirectoryMigrationService.shared.isMigrating else {
+            lastError = CloudSyncError.internalError(reason: t("migration.busy"))
+            return
+        }
         prepareLocalState()
 
         isSyncing = true
@@ -201,6 +205,10 @@ final class CloudSyncService: ObservableObject {
         return
         #else
         guard !isSyncing else { return }
+        guard !DirectoryMigrationService.shared.isMigrating else {
+            lastError = CloudSyncError.internalError(reason: t("migration.busy"))
+            return
+        }
         prepareLocalState()
 
         isSyncing = true

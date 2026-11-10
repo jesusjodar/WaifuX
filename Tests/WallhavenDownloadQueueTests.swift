@@ -86,7 +86,20 @@ enum AppLogger {
         let queue = PersistentDownloadQueueService.shared
         let model = WallpaperViewModel()
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        if mode == "migration" {
+        if mode == "suspend-startup" {
+            let object = try JSONSerialization.jsonObject(with: JSONEncoder().encode(image("aa0001")))
+            let job: [String: Any] = ["id": "wallpaper.aa0001", "payload": ["wallpaper": ["_0": object]], "state": "queued", "source": "manual", "addedAt": 0, "updatedAt": 0, "attemptCount": 0]
+            try JSONSerialization.data(withJSONObject: ["version": 1, "jobs": [job]]).write(to: checkpoint)
+            let token = await queue.suspendForLibraryMigration()
+            let restored = try JSONSerialization.jsonObject(with: Data(contentsOf: checkpoint)) as! [String: Any]
+            precondition((restored["jobs"] as! [[String: Any]]).contains { $0["id"] as? String == "wallpaper.aa0001" })
+            queue.configure(wallpaperViewModel: model)
+            try await Task.sleep(for: .milliseconds(15))
+            precondition(model.starts.isEmpty)
+            queue.resumeAfterLibraryMigration(token)
+            _ = try await queue.waitForRemoteCompletion(id: "wallpaper.aa0001")
+            precondition(model.attempts["aa0001"] == 1)
+        } else if mode == "migration" {
             let image = try image("aa0001")
             let legacyDirectory = directory.appendingPathComponent("LegacyLibrary")
             try FileManager.default.createDirectory(at: legacyDirectory, withIntermediateDirectories: true)
@@ -167,6 +180,24 @@ enum AppLogger {
             queue.resume(jobID: failed)
             _ = try await queue.waitForRemoteCompletion(id: failed)
             precondition(model.attempts["aa0006"] == 2)
+            let moving = try queue.submitWallpaper(image("aa0008"), folderID: nil)
+            try await eventually { model.attempts["aa0008"] == 1 }
+            let waiting = Task { try await queue.waitForRemoteCompletion(id: moving) }
+            let suspension = await queue.suspendForLibraryMigration()
+            let nested = await queue.suspendForLibraryMigration()
+            let queuedDuringMove = try queue.submitWallpaper(image("aa0009"), folderID: nil)
+            let userPaused = try queue.submitWallpaper(image("aa0010"), folderID: nil)
+            queue.pause(jobID: userPaused)
+            queue.resumeAfterLibraryMigration(suspension)
+            try await Task.sleep(for: .milliseconds(20))
+            precondition(model.running == 0 && model.attempts["aa0009"] == nil)
+            queue.resumeAfterLibraryMigration(nested)
+            _ = try await waiting.value
+            _ = try await queue.waitForRemoteCompletion(id: queuedDuringMove)
+            precondition(model.attempts["aa0008"] == 2 && model.attempts["aa0009"] == 1)
+            precondition(model.attempts["aa0010"] == nil)
+            queue.resume(jobID: userPaused)
+            _ = try await queue.waitForRemoteCompletion(id: userPaused)
             let stop = try queue.submitWallpaper(image("aa0007"), folderID: nil)
             try await eventually { model.attempts["aa0007"] == 1 }
             queue.prepareForProcessTermination()

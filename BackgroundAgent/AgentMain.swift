@@ -284,13 +284,17 @@ private enum AgentMain {
             return
         }
         #if DEBUG
-        if CommandLine.arguments.contains("--wallhaven-cloud-regression") {
+        if CommandLine.arguments.contains("--wallhaven-cloud-regression") || CommandLine.arguments.contains("--wallhaven-migration-regression") {
             guard BackgroundRuntimeRole.isIsolatedTest else { exit(2) }
             let app = NSApplication.shared
             app.setActivationPolicy(.accessory)
             Task { @MainActor in
-                do { try await WallhavenCloudIntegrationProbe.run(); exit(0) }
-                catch { print("CLOUD_REGRESSION_FAILED \(error)"); exit(1) }
+                do {
+                    if CommandLine.arguments.contains("--wallhaven-cloud-regression") { try await WallhavenCloudIntegrationProbe.run() }
+                    else { try await WallhavenMigrationIntegrationProbe.run() }
+                    exit(0)
+                }
+                catch { print("HELPER_REGRESSION_FAILED \(error)"); exit(1) }
             }
             app.run()
             return
