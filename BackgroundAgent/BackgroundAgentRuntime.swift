@@ -529,6 +529,13 @@
         stopping = true
         shutdownRequested = true
         return [:]
+      case "crop.update":
+        let screen = try a.screen("screen")
+        let settings = try a.decode("settings", as: DisplayCropSettings.self)
+        DisplayCropSettingsStore.shared.update(for: screen, interactive: true) { $0 = settings }
+        DisplayCropSettingsStore.shared.commitInteractive(for: screen, applyChanges: false)
+        try await DisplayCropSettingsStore.shared.applyToCurrentWallpaper(on: screen)
+        return [:]
       case "wallpaper.apply":
         let success = try await LocalWallpaperApplyService.apply(
           localURL: a.url("url"), targetScreens: a.screens("screens"),

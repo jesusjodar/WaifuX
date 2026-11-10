@@ -64,11 +64,7 @@ final class StatusBarController: NSObject, NSMenuDelegate {
           let current = CurrentWallpaperService.shared.activeURL(
             for: screen.wallpaperScreenIdentifier)
         else { continue }
-        let original =
-          await PortraitBlurFillWallpaperService.shared.originalSourceURL(
-            forDerivedWallpaperAt: current,
-            derivedWallpapersDirectory: DownloadPathManager.shared.derivedWallpapersFolderURL)
-          ?? current
+        let original = DesktopWallpaperSyncManager.shared.originalSourceURL(for: current)
         if let record = WallpaperLibraryService.shared.downloadRecord(
           forLocalFilePath: original.path)
         {
@@ -130,6 +126,25 @@ final class StatusBarController: NSObject, NSMenuDelegate {
       )
       detail.isEnabled = recordsByFingerprint[fingerprint] != nil
       sub.addItem(detail)
+      let crop = item(t("statusbar.cropAspect"), action: nil)
+      let cropMenu = NSMenu()
+      cropMenu.autoenablesItems = false
+      let adjust = item(CropAdjustOverlayController.shared.isActive(for: screen) ? t("statusbar.cropExit") : t("statusbar.cropAdjust"),
+        action: #selector(adjustCrop(_:)), payload: fingerprint)
+      adjust.isEnabled = recordsByFingerprint[fingerprint] != nil
+      cropMenu.addItem(adjust)
+      let settings = DisplayCropSettingsStore.shared.settings(for: screen)
+      for preset in AspectPreset.allCases where preset != .custom {
+        let title = preset == .autoFill ? t("statusbar.cropAspectAutoFill") : preset.displayName()
+        let entry = item(title, action: #selector(cropAspect(_:)), payload: fingerprint)
+        entry.tag = AspectPreset.allCases.firstIndex(of: preset) ?? 0
+        entry.state = settings.aspectPreset == preset ? .on : .off
+        cropMenu.addItem(entry)
+      }
+      cropMenu.addItem(item(t("statusbar.cropAspectCustom"), action: #selector(customCropAspect(_:)), payload: fingerprint))
+      cropMenu.addItem(item(t("statusbar.cropReset"), action: #selector(resetCrop(_:)), payload: fingerprint))
+      crop.submenu = cropMenu
+      sub.addItem(crop)
       let enabled = item(
         t("autoSwitchEnabled"), action: #selector(toggleRotation(_:)), payload: fingerprint)
       enabled.state = scheduler.resolvedDisplayConfig(for: screen).isEnabled ? .on : .off
@@ -211,6 +226,35 @@ final class StatusBarController: NSObject, NSMenuDelegate {
       scheduler.updateGlobalDisplayEnabled(!enabled)
     } else {
       scheduler.updateDisplayEnabled(!enabled, for: screen.wallpaperScreenIdentifier)
+    }
+  }
+  @objc private func adjustCrop(_ sender: NSMenuItem) {
+    guard let screen = screen(sender) else { return }
+    CropAdjustOverlayController.shared.toggle(for: screen, statusBarItemRef: statusItem)
+  }
+  @objc private func resetCrop(_ sender: NSMenuItem) {
+    guard let screen = screen(sender) else { return }
+    DisplayCropSettingsStore.shared.reset(for: screen)
+  }
+  @objc private func cropAspect(_ sender: NSMenuItem) {
+    guard let screen = screen(sender), AspectPreset.allCases.indices.contains(sender.tag) else { return }
+    DisplayCropSettingsStore.shared.update(for: screen) { $0.isEnabled = true; $0.aspectPreset = AspectPreset.allCases[sender.tag] }
+  }
+  @objc private func customCropAspect(_ sender: NSMenuItem) {
+    guard let screen = screen(sender) else { return }
+    let alert = NSAlert()
+    alert.messageText = t("statusbar.cropAspectCustom")
+    let field = NSTextField(string: "16:9")
+    field.frame = NSRect(x: 0, y: 0, width: 220, height: 24)
+    alert.accessoryView = field
+    alert.addButton(withTitle: t("confirm"))
+    alert.addButton(withTitle: t("cancel"))
+    guard alert.runModal() == .alertFirstButtonReturn else { return }
+    let values = field.stringValue.split(separator: ":").compactMap { Double($0.trimmingCharacters(in: .whitespaces)) }
+    guard values.count == 2, values[0].isFinite, values[1].isFinite, values[1] > 0,
+          (0.1...10).contains(values[0] / values[1]) else { NSSound.beep(); return }
+    DisplayCropSettingsStore.shared.update(for: screen) {
+      $0.isEnabled = true; $0.aspectPreset = .custom; $0.customAspect = values[0] / values[1]
     }
   }
   @objc private func restoreDesktop(_ sender: NSMenuItem) {

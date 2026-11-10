@@ -775,6 +775,24 @@ struct WallpaperDetailSheet: View {
                 }
             }
 
+            if let local = viewModel.localFileURLIfAvailable(for: wallpaper),
+               CurrentWallpaperService.shared.isCurrentWallpaper(localFileURL: local) {
+                Menu {
+                    ForEach(NSScreen.screens.filter { screen in
+                        guard let active = CurrentWallpaperService.shared.activeURL(for: screen.wallpaperScreenIdentifier) else { return false }
+                        return DesktopWallpaperSyncManager.shared.originalSourceURL(for: active).standardizedFileURL == local.standardizedFileURL
+                    }, id: \.wallpaperScreenIdentifier) { screen in
+                        Button(screen.localizedName) {
+                            CropAdjustOverlayController.shared.toggle(for: screen, statusBarItemRef: nil)
+                        }
+                    }
+                } label: {
+                    Image(systemName: "crop").font(.system(size: 16)).frame(width: 40, height: 40)
+                }
+                .menuStyle(.borderlessButton)
+                .help(t("statusbar.cropAdjust"))
+            }
+
             // 主按钮
             Button {
                 setAsDesktopWallpaper()

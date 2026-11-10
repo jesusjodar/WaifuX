@@ -45,8 +45,12 @@ final class CurrentWallpaperService: ObservableObject {
             let directory = DownloadPathManager.shared.derivedWallpapersFolderURL
             var originals: [URL] = []
             for url in values.values {
-                if let original = await PortraitBlurFillWallpaperService.shared.originalSourceURL(forDerivedWallpaperAt: url, derivedWallpapersDirectory: directory) {
-                    originals.append(original)
+                let registered = DesktopWallpaperSyncManager.shared.originalSourceURL(for: url)
+                if registered != url { originals.append(registered); continue }
+                for service in [DerivedStaticWallpaperService.portrait, .crop] {
+                    if let original = await service.originalSourceURL(forDerivedWallpaperAt: url, derivedWallpapersDirectory: directory) {
+                        originals.append(original)
+                    }
                 }
             }
             guard let self, revision == current else { return }

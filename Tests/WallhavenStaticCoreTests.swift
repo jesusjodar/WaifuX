@@ -1,8 +1,42 @@
 import Foundation
+import CoreGraphics
 
 @main
 enum WallhavenStaticCoreTests {
     static func main() throws {
+        let space = CGColorSpace(name: CGColorSpace.sRGB)!
+        let canvas = CGContext(data: nil, width: 100, height: 100, bitsPerComponent: 8,
+            bytesPerRow: 400, space: space, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+        canvas.setFillColor(CGColor(red: 1, green: 0, blue: 0, alpha: 1))
+        canvas.fill(CGRect(x: 0, y: 0, width: 50, height: 100))
+        canvas.setFillColor(CGColor(red: 0, green: 0, blue: 1, alpha: 1))
+        canvas.fill(CGRect(x: 50, y: 0, width: 50, height: 100))
+        let original = canvas.makeImage()!
+        var crop = DisplayCropSettings()
+        precondition(!crop.needsStaticRendering)
+        crop.zoom = 2
+        crop.pan.x = 0
+        let left = try StaticWallpaperCropRenderer.render(image: original, targetSize: CGSize(width: 100, height: 100), settings: crop)
+        crop.pan.x = 1
+        let right = try StaticWallpaperCropRenderer.render(image: original, targetSize: CGSize(width: 100, height: 100), settings: crop)
+        func pixel(_ image: CGImage, x: Int, y: Int) -> [UInt8] {
+            let bytes = CFDataGetBytePtr(image.dataProvider!.data!)!
+            let offset = y * image.bytesPerRow + x * 4
+            return Array(UnsafeBufferPointer(start: bytes + offset, count: 4))
+        }
+        precondition(pixel(left, x: 50, y: 50)[0] > 240 && pixel(left, x: 50, y: 50)[2] < 10)
+        precondition(pixel(right, x: 50, y: 50)[2] > 240 && pixel(right, x: 50, y: 50)[0] < 10)
+        crop = DisplayCropSettings()
+        crop.aspectPreset = .ratio1x1
+        crop.letterboxColorHex = "00ff00"
+        let boxed = try StaticWallpaperCropRenderer.render(image: original, targetSize: CGSize(width: 200, height: 100), settings: crop)
+        precondition(pixel(boxed, x: 10, y: 50)[1] > 240 && pixel(boxed, x: 10, y: 50)[0] < 10)
+        precondition(pixel(boxed, x: 60, y: 50)[0] > 240)
+        crop.zoom = .infinity
+        crop.pan.x = .nan
+        precondition(crop.sanitized.zoom == 1 && crop.sanitized.pan.x == 0.5)
+        precondition(WallpaperLibraryPath.isMigrationFile("DerivedWallpapers/StaticCrop/crop-" + String(repeating: "f", count: 32) + ".jpg"))
+        print("PASS: static crop pixel pan/zoom, aspect letterbox, invalid settings and derivative path policy")
         if CommandLine.arguments.count > 1 {
             let data = try Data(contentsOf: URL(fileURLWithPath: CommandLine.arguments[1]))
             let response = try JSONSerialization.jsonObject(with: data) as! [String: Any]

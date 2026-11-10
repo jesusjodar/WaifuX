@@ -31,10 +31,16 @@ enum WallpaperLibraryPath {
         if WallhavenLibraryFilePolicy.wallpaperID(relativePath: relativePath) != nil { return true }
         if !relativePath.contains("/"), WallhavenLibraryFilePolicy.wallpaperID(relativePath: "Wallpapers/" + relativePath) != nil { return true }
         let parts = relativePath.split(separator: "/", omittingEmptySubsequences: false)
-        guard parts.count == 3, parts[0] == "DerivedWallpapers", parts[1] == "PortraitBlurFill" else { return false }
+        guard parts.count == 3, parts[0] == "DerivedWallpapers" else { return false }
+        let prefix: String
+        switch parts[1] {
+        case "PortraitBlurFill": prefix = "blur-fill-"
+        case "StaticCrop": prefix = "crop-"
+        default: return false
+        }
         let filename = String(parts[2])
-        guard filename.hasPrefix("blur-fill-"), filename.hasSuffix(".jpg") else { return false }
-        let hash = String(filename.dropFirst(10).dropLast(4))
+        guard filename.hasPrefix(prefix), filename.hasSuffix(".jpg") else { return false }
+        let hash = String(filename.dropFirst(prefix.count).dropLast(4))
         // PortraitBlurFill uses the first 16 SHA-256 bytes (32 hex digits).
         return hash.utf8.count == 32 && hash.utf8.allSatisfy { (48...57).contains($0) || (97...102).contains($0) }
     }

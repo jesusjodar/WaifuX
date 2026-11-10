@@ -2,7 +2,7 @@ import AppKit
 import CoreGraphics
 
 /// 桌面可视区域调节 overlay：每屏一个全屏窗口，拖拽平移、滚轮缩放、ESC 退出。
-/// overlay 自带预览渲染，不依赖实际壁纸层；退出时 settings 已持久化，渲染器按持久化值刷新。
+/// overlay 自带预览渲染，不依赖实际壁纸层；退出时生成并应用静态派生图。
 @MainActor
 final class CropAdjustOverlayController {
     static let shared = CropAdjustOverlayController()
@@ -50,6 +50,7 @@ final class CropAdjustOverlayController {
         let screenID = screen.wallpaperScreenIdentifier
         guard windowsByScreenID[screenID] == nil else { return }
 
+        DisplayCropSettingsStore.shared.reloadFromPreferences()
         // contentRect + screen treats contentRect as relative to that screen.
         // Passing a global frame would double the external display origin.
         let window = CropAdjustOverlayWindow(
@@ -80,7 +81,7 @@ final class CropAdjustOverlayController {
 
     private func exit(for screen: NSScreen) {
         let screenID = screen.wallpaperScreenIdentifier
-        // 退出调节：落定一次确保 Darwin 已广播 / wgpu 已按最终 crop 重启
+        // 退出调节：保存并应用最终静态裁切
         DisplayCropSettingsStore.shared.commitInteractive(for: screen)
         if let window = windowsByScreenID.removeValue(forKey: screenID) {
             window.orderOut(nil)
@@ -133,6 +134,7 @@ private final class CropAdjustOverlayWindow: NSWindow {
 private final class CropAdjustOverlayView: NSView {
     private let screen: NSScreen
     private var lastDragLocation: NSPoint?
+    private var previewImage: CGImage?
     var onSettingsChanged: (() -> Void)?
 
     init(frame: NSRect, screen: NSScreen) {
@@ -142,19 +144,32 @@ private final class CropAdjustOverlayView: NSView {
         layer = CALayer()
         layer?.backgroundColor = NSColor(white: 0, alpha: 0.35).cgColor
         renderPreview()
+        if let current = CurrentWallpaperService.shared.activeURL(for: screen.wallpaperScreenIdentifier) {
+            let original = DesktopWallpaperSyncManager.shared.originalSourceURL(for: current)
+            if WallpaperLibraryService.shared.downloadRecord(forLocalFilePath: original.path) != nil {
+                Task { [weak self] in
+                    let result = await Task.detached(priority: .userInitiated) {
+                        WallpaperBoundedImageDecoder.decode(url: original)
+                    }.value
+                    guard let self, case .success(let decoded) = result else { return }
+                    previewImage = decoded.image
+                    renderPreview()
+                }
+            }
+        }
     }
 
     required init?(coder: NSCoder) { fatalError() }
 
     // MARK: - 预览渲染
 
-    /// 只画辅助 UI（可视框虚线边框 + 框外半透明暗化 + 提示文字），不遮挡真实壁纸。
-    /// 拖拽时 store 更新 → cropDidChangeNotification → 各渲染器实时刷新，用户透过 overlay 看到实际效果。
+    /// Static preview uses the same crop geometry as the committed derivative.
     private func renderPreview() {
         layer?.sublayers?.forEach { $0.removeFromSuperlayer() }
 
         let settings = DisplayCropSettingsStore.shared.settings(for: screen)
-        let wallpaperSize = CropAdjustOverlayController.wallpaperSize(for: screen) ?? screen.frame.size
+        let wallpaperSize = previewImage.map { CGSize(width: $0.width, height: $0.height) }
+            ?? CropAdjustOverlayController.wallpaperSize(for: screen) ?? screen.frame.size
         let layout = CropLayoutEngine.compute(
             wallpaperSize: wallpaperSize,
             screenSize: screen.frame.size,
@@ -169,6 +184,18 @@ private final class CropAdjustOverlayView: NSView {
             y: (1.0 - layout.viewportRect.y - layout.viewportRect.h) * bounds.height,
             width: layout.viewportRect.w * bounds.width,
             height: layout.viewportRect.h * bounds.height)
+
+        if let image = previewImage {
+            layer?.backgroundColor = layout.letterboxColor
+            let rect = layout.wallpaperCropRect
+            let cropped = image.cropping(to: CGRect(x: rect.x * Double(image.width), y: rect.y * Double(image.height),
+                width: rect.w * Double(image.width), height: rect.h * Double(image.height)))
+            let photo = CALayer()
+            photo.frame = vp
+            photo.contents = cropped
+            photo.contentsGravity = .resize
+            layer?.addSublayer(photo)
+        }
 
         // 框外暗化：全屏半透明填充 + viewport 区域挖空，叠加在真实壁纸上。
         // 使用 CGPath 的 evenOdd 填充规则：outer rect + inner rect = 框外着色。
@@ -226,8 +253,9 @@ private final class CropAdjustOverlayView: NSView {
         // 拖上（dy>0）→ 壁纸上移 → 看到壁纸下方 → pan.y 增大。
         // 灵敏度：拖动半个屏宽 = pan 从 0 走到 1。
         let sensitivity = max(1, bounds.width / 2)
-        // interactive=true：只本进程内即时刷新 + 写 App Group JSON，不广播 Darwin、不重启 wgpu
+        // interactive=true：仅更新本地预览
         DisplayCropSettingsStore.shared.update(for: screen, interactive: true) { s in
+            s.isEnabled = true
             s.pan.x = max(0, min(1, s.pan.x - dx / sensitivity))
             s.pan.y = max(0, min(1, s.pan.y + dy / sensitivity))
         }
@@ -237,7 +265,8 @@ private final class CropAdjustOverlayView: NSView {
 
     override func mouseUp(with event: NSEvent) {
         lastDragLocation = nil
-        // 拖拽结束：落定一次（持久化 + 广播 Darwin + 重启 wgpu）
+        scrollCommitWorkItem?.cancel()
+        // 拖拽结束：落定一次（保存并应用静态裁切）
         DisplayCropSettingsStore.shared.commitInteractive(for: screen)
     }
 
@@ -248,8 +277,9 @@ private final class CropAdjustOverlayView: NSView {
     override func scrollWheel(with event: NSEvent) {
         let delta = event.deltaY
         guard delta != 0 else { return }
-        // 滚轮也是 interactive，避免每个 tick 重启 wgpu
+        // 滚轮也是 interactive，避免每个 tick 重写桌面图
         DisplayCropSettingsStore.shared.update(for: screen, interactive: true) { s in
+            s.isEnabled = true
             s.zoom = max(1.0, min(4.0, s.zoom * (1 + delta * 0.03)))
         }
         renderPreview()
@@ -263,7 +293,7 @@ private final class CropAdjustOverlayView: NSView {
     }
 
     /// 触摸板双指 pinch。NSEvent.magnification 在 macOS 上是相对变化量，
-    /// 连续手势期间只更新内存态，结束时一次性持久化并广播。
+    /// 连续手势期间只更新内存态，结束时一次性保存并应用。
     override func magnify(with event: NSEvent) {
         let magnification = event.magnification
         guard magnification != 0 else {
@@ -273,6 +303,7 @@ private final class CropAdjustOverlayView: NSView {
             return
         }
         DisplayCropSettingsStore.shared.update(for: screen, interactive: true) { s in
+            s.isEnabled = true
             let multiplier = max(0.01, 1 + magnification)
             s.zoom = max(1.0, min(4.0, s.zoom * multiplier))
         }

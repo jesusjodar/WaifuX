@@ -461,8 +461,7 @@ final class MenuBarQuickSwitcherViewModel: ObservableObject {
         guard let currentURL, !userSelected else { return }
         let generation = activation
         identityTask = Task {
-            let original = await PortraitBlurFillWallpaperService.shared.originalSourceURL(forDerivedWallpaperAt: currentURL,
-                derivedWallpapersDirectory: DownloadPathManager.shared.derivedWallpapersFolderURL) ?? currentURL
+            let original = DesktopWallpaperSyncManager.shared.originalSourceURL(for: currentURL)
             guard !Task.isCancelled, isPresented, generation == activation, !userSelected,
                   let item = repository.currentItem(matching: original), repository.contains(item, folderIDs: selectedFolderIDs) else { return }
             if !batchItems.contains(where: { $0.id == item.id }) {

@@ -52,6 +52,7 @@ final class DesktopWallpaperSyncManager {
         if BackgroundRuntimeRole.isRemoteUI {
             BackgroundRuntimeBridge.observe { [weak self] snapshot in
                 guard let self, let values = snapshot["desktop"] as? [String: Any] else { return }
+                sourcePathByImagePath = values["sources"] as? [String: String] ?? [:]
                 lastSetImageURLByScreen = (values["screens"] as? [String: String] ?? [:]).compactMapValues(URL.init(string:))
                 lastSetImageURLByFingerprint = (values["fingerprints"] as? [String: String] ?? [:]).compactMapValues(URL.init(string:))
             }
@@ -136,7 +137,7 @@ final class DesktopWallpaperSyncManager {
     }
 
     func backgroundSnapshot() -> [String: Any] {
-        ["screens": lastSetImageURLByScreen.mapValues(\.absoluteString), "fingerprints": lastSetImageURLByFingerprint.mapValues(\.absoluteString)]
+        ["screens": lastSetImageURLByScreen.mapValues(\.absoluteString), "fingerprints": lastSetImageURLByFingerprint.mapValues(\.absoluteString), "sources": sourcePathByImagePath]
     }
 
     /// 在 WaifuX 首次改写某屏系统壁纸前，记录当时的系统桌面图。

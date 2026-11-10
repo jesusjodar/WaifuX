@@ -144,8 +144,11 @@ final class DirectoryMigrationService {
             }
             relativePaths = pending.relativePaths
         } else {
-            let derived = await PortraitBlurFillWallpaperService.shared.migrationFiles(
+            let portrait = await DerivedStaticWallpaperService.portrait.migrationFiles(
                 for: sourcePaths, in: oldRoot.appendingPathComponent("DerivedWallpapers"))
+            let cropped = await DerivedStaticWallpaperService.crop.migrationFiles(
+                for: sourcePaths, in: oldRoot.appendingPathComponent("DerivedWallpapers"))
+            let derived = portrait + cropped
             relativePaths = await Task.detached(priority: .userInitiated) {
                 let candidates = sourcePaths.map { URL(fileURLWithPath: $0) } + derived
                 return Array(Set(candidates.compactMap { url -> String? in
@@ -528,7 +531,8 @@ final class DirectoryMigrationService {
             guard WallhavenLibraryFilePolicy.wallpaperID(relativePath: relative) != nil else { return nil }
             return oldRoot.appendingPathComponent(relative).path
         })
-        try await PortraitBlurFillWallpaperService.shared.migrateArtifacts(from: oldRoot, to: newRoot, sourcePaths: oldPaths)
+        try await DerivedStaticWallpaperService.portrait.migrateArtifacts(from: oldRoot, to: newRoot, sourcePaths: oldPaths)
+        try await DerivedStaticWallpaperService.crop.migrateArtifacts(from: oldRoot, to: newRoot, sourcePaths: oldPaths)
         library.bulkUpdateDownloadPaths(oldPrefix: oldRoot.path, newPrefix: newRoot.path, wallpaperIDs: wallpaperIDs)
         guard library.verifyPersistedRecords() else {
             throw NSError(domain: "StaticWallpaperMigration", code: 1,

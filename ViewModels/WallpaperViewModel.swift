@@ -552,10 +552,9 @@ class WallpaperViewModel: ObservableObject {
         for path in pathsToDelete {
             let sourceURL = URL(fileURLWithPath: path)
             Task {
-                await PortraitBlurFillWallpaperService.shared.removeArtifacts(
-                    for: sourceURL,
-                    derivedWallpapersDirectory: derivedWallpapersDirectory
-                )
+                for service in [DerivedStaticWallpaperService.portrait, .crop] {
+                    await service.removeArtifacts(for: sourceURL, derivedWallpapersDirectory: derivedWallpapersDirectory)
+                }
             }
             guard FileManager.default.fileExists(atPath: path) else { continue }
             do {

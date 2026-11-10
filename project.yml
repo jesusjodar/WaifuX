@@ -152,6 +152,7 @@ targets:
     - path: Services/CacheService.swift
     - path: Services/CropAdjustOverlayController.swift
     - path: Services/CropLayoutEngine.swift
+    - path: Services/StaticWallpaperCropRenderer.swift
     - path: Services/CurrentWallpaperService.swift
     - path: Services/UserLibrary.swift
     - path: Services/DesktopIconManager.swift
@@ -174,7 +175,7 @@ targets:
     - path: Services/NotchOverlayManager.swift
     - path: Services/PowerSourceMonitor.swift
     - path: Services/SleepPreventer.swift
-    - path: Services/PortraitBlurFillWallpaperService.swift
+    - path: Services/DerivedStaticWallpaperService.swift
     - path: Services/StaticWallpaperApplyService.swift
     - path: Services/StaticWallpaperGrainManager.swift
     - path: Services/StatusBarController.swift

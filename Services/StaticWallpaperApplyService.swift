@@ -59,8 +59,16 @@ enum StaticWallpaperApplyService {
     for screen in screens {
       try Task.checkCancellation()
       var result = imageURL
-      if WaifuXPreferences.shared.bool(forKey: "portrait_blur_fill_enabled") {
-        result = try await PortraitBlurFillWallpaperService.shared.preparedWallpaperURL(
+      let crop = DisplayCropSettingsStore.shared.settings(for: screen)
+      if crop.needsStaticRendering {
+        result = try await DerivedStaticWallpaperService.crop.preparedWallpaperURL(
+          for: imageURL,
+          targetPixelSize: CGSize(width: screen.frame.width * screen.backingScaleFactor,
+            height: screen.frame.height * screen.backingScaleFactor),
+          derivedWallpapersDirectory: DownloadPathManager.shared.derivedWallpapersFolderURL,
+          cropSettings: crop)
+      } else if WaifuXPreferences.shared.bool(forKey: "portrait_blur_fill_enabled") {
+        result = try await DerivedStaticWallpaperService.portrait.preparedWallpaperURL(
           for: imageURL,
           targetPixelSize: CGSize(
             width: screen.frame.width * screen.backingScaleFactor,
@@ -68,7 +76,7 @@ enum StaticWallpaperApplyService {
           derivedWallpapersDirectory: DownloadPathManager.shared.derivedWallpapersFolderURL
         )
       }
-      guard !isTerminating, coordinator.isCurrent(token) else { throw CancellationError() }
+      guard !isTerminating, !DirectoryMigrationService.shared.isMigrating, coordinator.isCurrent(token) else { throw CancellationError() }
       prepared[screen.wallpaperScreenIdentifier] = result
     }
     let options: [NSWorkspace.DesktopImageOptionKey: Any] = [
@@ -88,7 +96,7 @@ enum StaticWallpaperApplyService {
     do {
       for screen in screens {
         try Task.checkCancellation()
-        guard !isTerminating, coordinator.isCurrent(token),
+        guard !isTerminating, !DirectoryMigrationService.shared.isMigrating, coordinator.isCurrent(token),
           let image = prepared[screen.wallpaperScreenIdentifier]
         else { throw CancellationError() }
         try workspace.setDesktopImageURLForAllSpaces(image, for: screen, options: options)

@@ -10,11 +10,17 @@ import UniformTypeIdentifiers
 ///
 /// 派生文件和原图分开保存，并以源文件指纹 + 目标像素尺寸建立映射，因此不会改写
 /// 下载记录、收藏记录或原始图片。映射随派生目录保存，旧原图删除时可精确清理。
-actor PortraitBlurFillWallpaperService {
-    static let shared = PortraitBlurFillWallpaperService()
+actor DerivedStaticWallpaperService {
+    static let portrait = DerivedStaticWallpaperService(directory: "PortraitBlurFill", prefix: "blur-fill-")
+    static let crop = DerivedStaticWallpaperService(directory: "StaticCrop", prefix: "crop-")
+    private let artifactDirectoryName: String
+    private let filenamePrefix: String
+    private init(directory: String, prefix: String) {
+        artifactDirectoryName = directory
+        filenamePrefix = prefix
+    }
 
     private static let mappingFileName = "mapping.json"
-    private static let artifactDirectoryName = "PortraitBlurFill"
     private static let rendererVersion = 1
 
     private struct MappingDocument: Codable {
@@ -29,6 +35,7 @@ actor PortraitBlurFillWallpaperService {
         var targetHeight: Int
         var outputPath: String
         var createdAt: Date
+        var cropSettings: DisplayCropSettings?
     }
 
     private struct RenderRequest: Sendable {
@@ -36,6 +43,7 @@ actor PortraitBlurFillWallpaperService {
         var outputURL: URL
         var targetWidth: Int
         var targetHeight: Int
+        var cropSettings: DisplayCropSettings?
     }
 
     private var artifacts: [String: Artifact] = [:]
@@ -45,10 +53,14 @@ actor PortraitBlurFillWallpaperService {
     func preparedWallpaperURL(
         for sourceURL: URL,
         targetPixelSize: CGSize,
-        derivedWallpapersDirectory: URL
+        derivedWallpapersDirectory: URL,
+        cropSettings: DisplayCropSettings? = nil
     ) async throws -> URL {
-        let targetWidth = max(1, Int(targetPixelSize.width.rounded()))
-        let targetHeight = max(1, Int(targetPixelSize.height.rounded()))
+        guard let budget = WallpaperSnapshotPixelBudget.layout(width: targetPixelSize.width, height: targetPixelSize.height) else {
+            throw CocoaError(.coderInvalidValue)
+        }
+        let targetWidth = budget.width
+        let targetHeight = budget.height
         guard targetWidth > 1, targetHeight > 1 else { return sourceURL }
 
         let sourcePath = sourceURL.standardizedFileURL.path
@@ -61,10 +73,10 @@ actor PortraitBlurFillWallpaperService {
         }
 
         let sourceSize = try Self.pixelSize(of: sourceURL)
-        guard sourceSize.height > sourceSize.width else { return sourceURL }
+        guard cropSettings != nil || sourceSize.height > sourceSize.width else { return sourceURL }
 
         let artifactDirectory = derivedWallpapersDirectory
-            .appendingPathComponent(Self.artifactDirectoryName, isDirectory: true)
+            .appendingPathComponent(artifactDirectoryName, isDirectory: true)
         let mappingURL = artifactDirectory.appendingPathComponent(Self.mappingFileName)
         try loadArtifactsIfNeeded(from: mappingURL)
 
@@ -72,38 +84,41 @@ actor PortraitBlurFillWallpaperService {
         let key = Self.artifactKey(
             sourceFingerprint: sourceFingerprint,
             targetWidth: targetWidth,
-            targetHeight: targetHeight
+            targetHeight: targetHeight,
+            cropSettings: cropSettings
         )
 
-        if let artifact = artifacts[key],
-           artifact.sourceFingerprint == sourceFingerprint,
-           FileManager.default.fileExists(atPath: artifact.outputPath) {
-            return URL(fileURLWithPath: artifact.outputPath)
-        }
+        if let artifact = artifacts[key], artifact.sourceFingerprint == sourceFingerprint,
+           let output = validatedOutputURL(artifact.outputPath, in: artifactDirectory),
+           FileManager.default.fileExists(atPath: output.path) { return output }
 
         try FileManager.default.createDirectory(
             at: artifactDirectory,
             withIntermediateDirectories: true
         )
 
-        let outputURL = artifactDirectory.appendingPathComponent("blur-fill-\(key).jpg")
+        let outputURL = artifactDirectory.appendingPathComponent("\(filenamePrefix)\(key).jpg")
         let request = RenderRequest(
             sourceURL: sourceURL,
             outputURL: outputURL,
             targetWidth: targetWidth,
-            targetHeight: targetHeight
+            targetHeight: targetHeight,
+            cropSettings: cropSettings
         )
         try await Task.detached(priority: .userInitiated) {
             try Self.render(request)
         }.value
 
+        // Rendering yields this actor. Another request may have switched roots.
+        try loadArtifactsIfNeeded(from: mappingURL)
         artifacts[key] = Artifact(
             sourcePath: sourcePath,
             sourceFingerprint: sourceFingerprint,
             targetWidth: targetWidth,
             targetHeight: targetHeight,
             outputPath: outputURL.path,
-            createdAt: .now
+            createdAt: .now,
+            cropSettings: cropSettings
         )
         try persistArtifacts(to: mappingURL)
         return outputURL
@@ -117,12 +132,12 @@ actor PortraitBlurFillWallpaperService {
     ) -> URL? {
         guard url.isFileURL else { return nil }
         let mappingURL = derivedWallpapersDirectory
-            .appendingPathComponent(Self.artifactDirectoryName, isDirectory: true)
+            .appendingPathComponent(artifactDirectoryName, isDirectory: true)
             .appendingPathComponent(Self.mappingFileName)
         guard (try? loadArtifactsIfNeeded(from: mappingURL)) != nil else { return nil }
         let path = url.standardizedFileURL.path
         guard let artifact = artifacts.values.first(where: {
-            URL(fileURLWithPath: $0.outputPath).standardizedFileURL.path == path
+            validatedOutputURL($0.outputPath, in: mappingURL.deletingLastPathComponent())?.path == path
         }) else { return nil }
         return URL(fileURLWithPath: artifact.sourcePath)
     }
@@ -133,7 +148,7 @@ actor PortraitBlurFillWallpaperService {
         derivedWallpapersDirectory: URL
     ) {
         let artifactDirectory = derivedWallpapersDirectory
-            .appendingPathComponent(Self.artifactDirectoryName, isDirectory: true)
+            .appendingPathComponent(artifactDirectoryName, isDirectory: true)
         let mappingURL = artifactDirectory.appendingPathComponent(Self.mappingFileName)
         guard (try? loadArtifactsIfNeeded(from: mappingURL)) != nil else { return }
 
@@ -144,8 +159,9 @@ actor PortraitBlurFillWallpaperService {
         guard !keys.isEmpty else { return }
 
         for key in keys {
-            if let outputPath = artifacts[key]?.outputPath {
-                try? FileManager.default.removeItem(atPath: outputPath)
+            if let outputPath = artifacts[key]?.outputPath,
+               let output = validatedOutputURL(outputPath, in: artifactDirectory) {
+                try? FileManager.default.removeItem(at: output)
             }
             artifacts.removeValue(forKey: key)
         }
@@ -155,14 +171,14 @@ actor PortraitBlurFillWallpaperService {
     /// Only artifacts whose original belongs to a registered Wallhaven record
     /// may participate in a directory move. Old mapping documents stay intact.
     func migrationFiles(for sourcePaths: Set<String>, in derivedDirectory: URL) -> [URL] {
-        let directory = derivedDirectory.appendingPathComponent(Self.artifactDirectoryName, isDirectory: true)
+        let directory = derivedDirectory.appendingPathComponent(artifactDirectoryName, isDirectory: true)
         guard (try? loadArtifactsIfNeeded(from: directory.appendingPathComponent(Self.mappingFileName))) != nil else { return [] }
         let canonicalSources = Set(sourcePaths.map { URL(fileURLWithPath: $0).standardizedFileURL.resolvingSymlinksInPath().path })
         return artifacts.values.compactMap { artifact in
             guard canonicalSources.contains(URL(fileURLWithPath: artifact.sourcePath).standardizedFileURL.resolvingSymlinksInPath().path) else { return nil }
             let output = URL(fileURLWithPath: artifact.outputPath)
             let filename = output.lastPathComponent
-            let relative = "DerivedWallpapers/PortraitBlurFill/" + filename
+            let relative = "DerivedWallpapers/\(artifactDirectoryName)/" + filename
             guard WallpaperLibraryPath.isMigrationFile(relative),
                   output.standardizedFileURL.resolvingSymlinksInPath().path
                     == directory.appendingPathComponent(filename).standardizedFileURL.resolvingSymlinksInPath().path,
@@ -172,12 +188,12 @@ actor PortraitBlurFillWallpaperService {
     }
 
     func migrateArtifacts(from oldRoot: URL, to newRoot: URL, sourcePaths: Set<String>) throws {
-        let oldDirectory = oldRoot.appendingPathComponent("DerivedWallpapers").appendingPathComponent(Self.artifactDirectoryName)
+        let oldDirectory = oldRoot.appendingPathComponent("DerivedWallpapers").appendingPathComponent(artifactDirectoryName)
         let oldMapping = oldDirectory.appendingPathComponent(Self.mappingFileName)
         guard FileManager.default.fileExists(atPath: oldMapping.path) else { return }
         try loadArtifactsIfNeeded(from: oldMapping)
         let previous = artifacts
-        let newDirectory = newRoot.appendingPathComponent("DerivedWallpapers").appendingPathComponent(Self.artifactDirectoryName)
+        let newDirectory = newRoot.appendingPathComponent("DerivedWallpapers").appendingPathComponent(artifactDirectoryName)
         let newMapping = newDirectory.appendingPathComponent(Self.mappingFileName)
         try loadArtifactsIfNeeded(from: newMapping)
         let canonicalSources = Set(sourcePaths.map { URL(fileURLWithPath: $0).standardizedFileURL.resolvingSymlinksInPath().path })
@@ -187,16 +203,26 @@ actor PortraitBlurFillWallpaperService {
                     == oldDirectory.appendingPathComponent(filename).standardizedFileURL.resolvingSymlinksInPath(),
                   let sourcePath = WallpaperLibraryPath.rebase(artifact.sourcePath, from: oldRoot.path, to: newRoot.path),
                   let outputPath = WallpaperLibraryPath.rebase(artifact.outputPath, from: oldRoot.path, to: newRoot.path),
-                  WallpaperLibraryPath.isMigrationFile("DerivedWallpapers/PortraitBlurFill/" + URL(fileURLWithPath: outputPath).lastPathComponent),
+                  WallpaperLibraryPath.isMigrationFile("DerivedWallpapers/\(artifactDirectoryName)/" + URL(fileURLWithPath: outputPath).lastPathComponent),
                   FileManager.default.fileExists(atPath: outputPath) else { continue }
             var next = artifact
             next.sourcePath = sourcePath
             next.outputPath = outputPath
             next.sourceFingerprint = Self.rebasedPath(artifact.sourceFingerprint, from: oldRoot.path, to: newRoot.path)
-            let key = Self.artifactKey(sourceFingerprint: next.sourceFingerprint, targetWidth: next.targetWidth, targetHeight: next.targetHeight)
+            let key = Self.artifactKey(sourceFingerprint: next.sourceFingerprint, targetWidth: next.targetWidth, targetHeight: next.targetHeight, cropSettings: next.cropSettings)
             if artifacts[key].map({ FileManager.default.fileExists(atPath: $0.outputPath) }) != true { artifacts[key] = next }
         }
         try persistArtifacts(to: newMapping)
+    }
+
+    private func validatedOutputURL(_ path: String, in directory: URL) -> URL? {
+        let output = URL(fileURLWithPath: path).standardizedFileURL
+        guard path.hasPrefix("/"),
+              WallpaperLibraryPath.isMigrationFile("DerivedWallpapers/\(artifactDirectoryName)/" + output.lastPathComponent),
+              output.resolvingSymlinksInPath() == directory.appendingPathComponent(output.lastPathComponent).standardizedFileURL.resolvingSymlinksInPath(),
+              output.deletingLastPathComponent().standardizedFileURL == directory.standardizedFileURL,
+              output.resolvingSymlinksInPath().deletingLastPathComponent() == directory.standardizedFileURL.resolvingSymlinksInPath() else { return nil }
+        return output
     }
 
     private func loadArtifactsIfNeeded(from mappingURL: URL) throws {
@@ -262,9 +288,13 @@ actor PortraitBlurFillWallpaperService {
     private nonisolated static func artifactKey(
         sourceFingerprint: String,
         targetWidth: Int,
-        targetHeight: Int
+        targetHeight: Int,
+        cropSettings: DisplayCropSettings? = nil
     ) -> String {
-        let raw = "\(rendererVersion)|\(sourceFingerprint)|\(targetWidth)x\(targetHeight)"
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        let settings = cropSettings.flatMap { try? encoder.encode($0) }.flatMap { String(data: $0, encoding: .utf8) }
+        let raw = "\(rendererVersion)|\(sourceFingerprint)|\(targetWidth)x\(targetHeight)" + (settings.map { "|" + $0 } ?? "")
         let hash = SHA256.hash(data: Data(raw.utf8))
         return hash.prefix(16).map { String(format: "%02x", $0) }.joined()
     }
@@ -278,30 +308,8 @@ actor PortraitBlurFillWallpaperService {
     }
 
     private nonisolated static func render(_ request: RenderRequest) throws {
-        guard let source = CGImageSourceCreateWithURL(request.sourceURL as CFURL, nil) else {
-            throw NSError(
-                domain: "PortraitBlurFillWallpaper",
-                code: 3,
-                userInfo: [NSLocalizedDescriptionKey: t("无法解码原始壁纸")]
-            )
-        }
-
-        let options: [CFString: Any] = [
-            kCGImageSourceShouldCacheImmediately: true
-        ]
-        guard let sourceImage = CGImageSourceCreateImageAtIndex(source, 0, options as CFDictionary) else {
-            throw NSError(
-                domain: "PortraitBlurFillWallpaper",
-                code: 4,
-                userInfo: [NSLocalizedDescriptionKey: t("无法解码原始壁纸图像")]
-            )
-        }
-
-        let orientation = (
-            CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any]
-        )?[kCGImagePropertyOrientation] as? NSNumber
-        let orientedSourceImage = CIImage(cgImage: sourceImage)
-            .oriented(forExifOrientation: Int32(orientation?.intValue ?? 1))
+        let decoded = try WallpaperBoundedImageDecoder.decode(url: request.sourceURL).get()
+        let orientedSourceImage = CIImage(cgImage: decoded.image)
         let sourceExtent = orientedSourceImage.extent.integral
         let sourceImageCI = orientedSourceImage.transformed(by: CGAffineTransform(
             translationX: -sourceExtent.origin.x,
@@ -359,19 +367,23 @@ actor PortraitBlurFillWallpaperService {
             .composited(over: darkenedBackground)
             .cropped(to: targetRect)
 
-        let context = CIContext(options: [.workingColorSpace: NSNull()])
-        guard let outputColorSpace = CGColorSpace(name: CGColorSpace.sRGB),
-              let renderedImage = context.createCGImage(finalImage, from: targetRect, format: .RGBA8, colorSpace: outputColorSpace) else {
-            throw NSError(
-                domain: "PortraitBlurFillWallpaper",
-                code: 6,
-                userInfo: [NSLocalizedDescriptionKey: t("无法渲染模糊填充壁纸")]
-            )
+        let renderedImage: CGImage
+        if let settings = request.cropSettings {
+            renderedImage = try StaticWallpaperCropRenderer.render(
+                image: decoded.image, targetSize: CGSize(width: targetWidth, height: targetHeight), settings: settings)
+        } else {
+            let context = CIContext(options: [.workingColorSpace: NSNull()])
+            guard let space = CGColorSpace(name: CGColorSpace.sRGB),
+                  let output = context.createCGImage(finalImage, from: targetRect, format: .RGBA8, colorSpace: space) else {
+                throw CocoaError(.fileWriteUnknown)
+            }
+            renderedImage = output
         }
 
         let temporaryURL = request.outputURL
             .deletingLastPathComponent()
             .appendingPathComponent(".\(UUID().uuidString).tmp")
+        defer { try? FileManager.default.removeItem(at: temporaryURL) }
         guard let destination = CGImageDestinationCreateWithURL(
             temporaryURL as CFURL,
             UTType.jpeg.identifier as CFString,

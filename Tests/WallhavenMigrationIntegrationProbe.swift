@@ -49,13 +49,21 @@ enum WallhavenMigrationIntegrationProbe {
             .init(wallpaper: WallhavenCloudIntegrationProbe.image("abc123"), localFilePath: original.resolvingSymlinksInPath().path),
             .init(wallpaper: WallhavenCloudIntegrationProbe.image("def456"), localFilePath: sibling.path),
         ])
-        let derived = try await PortraitBlurFillWallpaperService.shared.preparedWallpaperURL(
+        let derived = try await DerivedStaticWallpaperService.portrait.preparedWallpaperURL(
             for: original, targetPixelSize: CGSize(width: 192, height: 108),
             derivedWallpapersDirectory: old.appendingPathComponent("DerivedWallpapers"))
         let derivedBitmap = NSBitmapImageRep(data: try Data(contentsOf: derived))
         try require(derivedBitmap?.pixelsWide == 192 && derivedBitmap?.pixelsHigh == 108
             && derivedBitmap?.cgImage?.colorSpace?.model == .rgb, "Derived image has invalid dimensions or color space")
         try require(derived != original, "Portrait fixture did not create a derived image")
+        var cropSettings = DisplayCropSettings()
+        cropSettings.zoom = 2
+        cropSettings.pan.x = 0
+        let cropped = try await DerivedStaticWallpaperService.crop.preparedWallpaperURL(
+            for: original, targetPixelSize: CGSize(width: 192, height: 108),
+            derivedWallpapersDirectory: old.appendingPathComponent("DerivedWallpapers"), cropSettings: cropSettings)
+        let cropBytes = try Data(contentsOf: cropped)
+        let newCropped = new.appendingPathComponent("DerivedWallpapers/StaticCrop/" + cropped.lastPathComponent)
         let oldMapping = old.appendingPathComponent("DerivedWallpapers/PortraitBlurFill/mapping.json")
         let oldMappingBytes = try Data(contentsOf: oldMapping)
         let newDerived = new.appendingPathComponent("DerivedWallpapers/PortraitBlurFill/" + derived.lastPathComponent)
@@ -81,10 +89,18 @@ enum WallhavenMigrationIntegrationProbe {
         try require(library.downloadRecord(for: "abc123")?.localFilePath == original.resolvingSymlinksInPath().path, "Paths changed despite copy conflict")
         try fm.removeItem(at: destination)
         let result = await migration.migrate(from: alias, to: new) { _ in }
-        guard case .success(let moved, let deleted) = result, moved == 2, deleted == 2 else {
+        guard case .success(let moved, let deleted) = result, moved == 3, deleted == 3 else {
             throw WallhavenCloudIntegrationProbe.Failed(detail: "Static migration failed: \(result)")
         }
         try require(try Data(contentsOf: destination) == bytes, "Copied original differs")
+        try require(try Data(contentsOf: newCropped) == cropBytes && !fm.fileExists(atPath: cropped.path), "Static crop was not migrated intact")
+        let cropSource = await DerivedStaticWallpaperService.crop.originalSourceURL(
+            forDerivedWallpaperAt: newCropped, derivedWallpapersDirectory: new.appendingPathComponent("DerivedWallpapers"))
+        try require(cropSource?.path == destination.path, "Crop source mapping was not rebased")
+        let reusedCrop = try await DerivedStaticWallpaperService.crop.preparedWallpaperURL(
+            for: destination, targetPixelSize: CGSize(width: 192, height: 108),
+            derivedWallpapersDirectory: new.appendingPathComponent("DerivedWallpapers"), cropSettings: cropSettings)
+        try require(reusedCrop == newCropped, "Migrated crop cache key did not retain settings")
         try require(!fm.fileExists(atPath: original.path) && !fm.fileExists(atPath: derived.path), "Verified sources not moved")
         try require(try Data(contentsOf: retired) == Data("retired episode".utf8), "Retired episode was changed")
         try require(try Data(contentsOf: unregistered) == Data("unregistered original".utf8), "Unregistered image was changed")
@@ -93,7 +109,7 @@ enum WallhavenMigrationIntegrationProbe {
         try require(library.downloadRecord(for: "def456")?.localFilePath == sibling.path, "Sibling directory path was rebased")
         try require(library.verifyPersistedRecords(), "Migration records were not durable")
         try require(GlobalWallpaperSyncCoordinator.shared.lastSuccessfulApply?.localPath == destination.path, "Global snapshot path was not rebased")
-        let recoveredOriginal = await PortraitBlurFillWallpaperService.shared.originalSourceURL(
+        let recoveredOriginal = await DerivedStaticWallpaperService.portrait.originalSourceURL(
             forDerivedWallpaperAt: newDerived, derivedWallpapersDirectory: new.appendingPathComponent("DerivedWallpapers"))
         try require(recoveredOriginal?.path == destination.path, "Derived-to-original mapping was not migrated")
         try require(try Data(contentsOf: oldMapping) == oldMappingBytes, "Original artifact metadata was overwritten")
@@ -106,14 +122,14 @@ enum WallhavenMigrationIntegrationProbe {
             "Migration before executor configuration discarded queued downloads")
         let newMapping = new.appendingPathComponent("DerivedWallpapers/PortraitBlurFill/mapping.json")
         let newMappingBytes = try Data(contentsOf: newMapping)
-        _ = await PortraitBlurFillWallpaperService.shared.originalSourceURL(forDerivedWallpaperAt: newDerived,
+        _ = await DerivedStaticWallpaperService.portrait.originalSourceURL(forDerivedWallpaperAt: newDerived,
             derivedWallpapersDirectory: root.appendingPathComponent("absent-derived-directory"))
         try Data("corrupt mapping".utf8).write(to: newMapping)
-        let corruptLookup = await PortraitBlurFillWallpaperService.shared.originalSourceURL(forDerivedWallpaperAt: newDerived,
+        let corruptLookup = await DerivedStaticWallpaperService.portrait.originalSourceURL(forDerivedWallpaperAt: newDerived,
             derivedWallpapersDirectory: new.appendingPathComponent("DerivedWallpapers"))
         try require(corruptLookup == nil, "Corrupt derived mapping was accepted")
         try newMappingBytes.write(to: newMapping)
-        let repairedLookup = await PortraitBlurFillWallpaperService.shared.originalSourceURL(forDerivedWallpaperAt: newDerived,
+        let repairedLookup = await DerivedStaticWallpaperService.portrait.originalSourceURL(forDerivedWallpaperAt: newDerived,
             derivedWallpapersDirectory: new.appendingPathComponent("DerivedWallpapers"))
         try require(repairedLookup?.path == destination.path, "A failed derived mapping read poisoned the next retry")
         let scopedOnly = old.appendingPathComponent("Wallpapers/wallhaven-ghi789.png")

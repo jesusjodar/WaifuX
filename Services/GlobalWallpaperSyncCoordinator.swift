@@ -73,11 +73,7 @@ final class GlobalWallpaperSyncCoordinator {
         let current = CurrentWallpaperService.shared.activeURL(
           for: screen.wallpaperScreenIdentifier)
       {
-        original =
-          await PortraitBlurFillWallpaperService.shared.originalSourceURL(
-            forDerivedWallpaperAt: current,
-            derivedWallpapersDirectory: DownloadPathManager.shared.derivedWallpapersFolderURL)
-          ?? current
+        original = DesktopWallpaperSyncManager.shared.originalSourceURL(for: current)
       }
       guard let original,
         WallpaperLibraryService.shared.downloadRecord(forLocalFilePath: original.path) != nil

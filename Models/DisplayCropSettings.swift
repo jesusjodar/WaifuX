@@ -83,5 +83,22 @@ struct DisplayCropSettings: Codable, Equatable {
         isEnabled
     }
 
+    /// Defaults retain the normal static fill and optional portrait blur fill.
+    var needsStaticRendering: Bool {
+        isEnabled && (aspectPreset != .autoFill || abs(pan.x - 0.5) > 0.00001
+            || abs(pan.y - 0.5) > 0.00001 || abs(zoom - 1) > 0.00001)
+    }
+
+    var sanitized: DisplayCropSettings {
+        var value = self
+        value.zoom = zoom.isFinite ? min(4, max(1, zoom)) : 1
+        value.pan = CGPoint(x: pan.x.isFinite ? min(1, max(0, pan.x)) : 0.5,
+                            y: pan.y.isFinite ? min(1, max(0, pan.y)) : 0.5)
+        if let aspect = customAspect, !aspect.isFinite || aspect < 0.1 || aspect > 10 {
+            value.customAspect = nil
+        }
+        return value
+    }
+
     static let defaultSettings = DisplayCropSettings()
 }
