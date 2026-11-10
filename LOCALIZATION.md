@@ -1,23 +1,9 @@
-# App localization
+# Localization
 
-The interface uses `LocalizationService` and its `t(_:)` lookup. Supported languages are Simplified Chinese, English, Japanese and Spanish (Spain). Choose Spanish in Settings → General → Language; it applies immediately. A system language beginning with `es` also selects the Spanish translation on first launch.
+`Services/LocalizationService.swift` owns the static app's four catalogs: Spanish (Spain), English, Simplified Chinese and Japanese. Set the language in Settings → General; a system locale beginning with `es` selects Spanish on first launch.
 
-## Adding or updating strings
+Add every new interface key to all four catalogs. Preserve format tokens such as `%@`, `%d`, `%%` and named placeholders exactly. API tags, stored enum values, paths, user content and protocol messages are independent of the interface language. Existing Chinese literal keys are retained where they are still used; new text should use semantic keys.
 
-- Add a semantic key to the English catalog and translate it in the Spanish catalog. Preserve format tokens (`%@`, `%d`, `%%`) and named placeholders (`{number}`, `{count}`) exactly.
-- Legacy Chinese literals that previously bypassed localization use their original text as a lookup key. This preserves their existing fallback in other languages. New English keys fall back to English when a language does not yet supply them.
-- Keep API tags, stored enum raw values, paths, protocol messages and user/author-provided wallpaper content independent of the interface language.
-- The property editor bridges its bundled Chinese labels through the same catalog. Author-provided property localization prefers the selected app language, including `es-es`, when the wallpaper supplies it.
-- The standalone screen saver has a small separate `SaverLocalization` table and localized bundle names. The app's permission descriptions live in `App/es.lproj/InfoPlist.strings`.
+Help and GuideKit describe the static Wallhaven app. Tour content versions must be advanced when instructions change. Catalog entries for retired features, the property editor and the standalone screen saver have been removed.
 
-## Validation
-
-Run `python3 scripts/verify-spanish-localization.py` on macOS with the Swift toolchain. It checks catalog coverage, duplicate keys and format placeholders, then compiles the actual localization service against in-memory preferences. It exercises locale detection, preference restoration, change notifications, language switching, fallback behavior, screen saver messages and property-editor translation. When Node is available, it also checks the resulting JavaScript syntax. It does not start WaifuX, register its helper, alter wallpapers or write app preferences.
-
-Build all targets with:
-
-```sh
-xcodebuild -project WaifuX.xcodeproj -scheme WaifuX -configuration Debug -derivedDataPath /tmp/WaifuX-localization-build CODE_SIGNING_ALLOWED=NO build
-```
-
-System permission dialogs follow the language selected for the app by macOS; the in-app language picker cannot override the operating system's dialog language. Third-party catalog titles, subtitles and wallpaper-authored content retain their source text unless the source supplies a Spanish translation.
+Run `python3 scripts/verify-spanish-localization.py`. It checks literal lookup coverage, duplicate keys, catalog parity and format tokens, then compiles the real service with in-memory preferences. Runtime tests cover Spanish locale detection, saved language, notifications, switching and fallback. It does not launch the app or touch its real preferences. Actual UI layout still needs visual review.

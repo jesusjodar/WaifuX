@@ -1,53 +1,12 @@
-cask "waifux" do
+cask "waifux-wallhaven" do
   version "__VERSION__"
+  sha256 "__SHA256__"
 
-  # 按架构分发：arm64 包含场景渲染器全家桶；x86_64 包不含（wgpu 生态暂为 arm64-only）。
-  on_arm do
-    sha256 "__SHA256_ARM__"
+  url "https://github.com/jesusjodar/WaifuX/releases/download/v#{version}/WaifuX-Wallhaven-#{version}-universal.zip"
+  name "WaifuX Wallhaven"
+  desc "Static Wallhaven wallpaper browser for macOS"
+  homepage "https://github.com/jesusjodar/WaifuX"
 
-    url "https://github.com/jipika/WaifuX/releases/download/v#{version}/WaifuX-arm64.dmg"
-  end
-  on_intel do
-    sha256 "__SHA256_INTEL__"
-
-    url "https://github.com/jipika/WaifuX/releases/download/v#{version}/WaifuX-x86_64.dmg"
-  end
-  name "WaifuX"
-  desc "Beautiful anime wallpaper and content browser"
-  homepage "https://github.com/jipika/WaifuX"
-
-  livecheck do
-    url :url
-    regex(/^v?(\d+(?:\.\d+)+)$/i)
-  end
-
-  auto_updates true
-  depends_on macos: :sonoma
-
+  depends_on macos: ">= :sonoma"
   app "WaifuX.app"
-
-  # Registration is best-effort because Homebrew 6 runs postflight steps in a
-  # sandbox that cannot always reach LaunchServices, PlugInKit, or WallpaperAgent.
-  # The app performs the authoritative registration when it starts.
-  postflight_steps do
-    run "/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister",
-        args:         ["-f", "{{staged_path}}/WaifuX.app"],
-        must_succeed: false,
-        print_stderr: false
-    run "/usr/bin/pluginkit",
-        args:         ["-e", "use", "-i", "com.waifux.app.wallpaperextension"],
-        must_succeed: false,
-        print_stderr: false
-    run "/usr/bin/killall",
-        args:         ["WallpaperAgent"],
-        must_succeed: false,
-        print_stderr: false
-  end
-
-  zap trash: [
-    "~/Library/Application Support/WaifuX",
-    "~/Library/Caches/com.waifux.app",
-    "~/Library/Preferences/com.waifux.app.plist",
-    "~/Library/Saved Application State/com.waifux.app.savedState",
-  ]
 end

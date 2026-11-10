@@ -1,146 +1,54 @@
-# Xcode
+# Xcode and build products
 *.xcuserstate
 *.xcworkspace
 xcuserdata/
 build/
-# 仅忽略 xcodeproj 内除 pbxproj / 共享 Scheme 外的内容（否则克隆后无 Scheme，Cmd+R 无法 Run）
 *.xcodeproj/*
 !*.xcodeproj/project.pbxproj
 !*.xcodeproj/xcshareddata/
 !*.xcodeproj/xcshareddata/xcschemes/
 !*.xcodeproj/xcshareddata/xcschemes/*.xcscheme
-
-# macOS
-.DS_Store
-*.log
-.AppleDouble
-.LSOverride
-
-# Swift Package Manager
-Packages/
-.swiftpm/
-
-# CocoaPods
-Pods/
-Docs/superpowers
-# App
 *.app
 *.dSYM
+Packages/
+.swiftpm/
+.derivedData/
 
-# Cache directories
+# Local state
+.DS_Store
+*.log
+*.tmp
+.AppleDouble
+.LSOverride
 __pycache__/
 *.py[cod]
-.derivedData/
 .WallHavenCache/
 .WallHavenImageCache/
+node_modules/
+/package.json
+/package-lock.json
 
-# Editor / AI 助手说明（仅本地，不提交、不推送；pre-commit 亦禁止 -f 强加）
+# Local editor and assistant instructions
 AGENTS.md
 CLAUDE.md
-# 其他常见 AI 编辑器说明（若放在仓库根目录）
 GEMINI.md
 .cursorrules
 COPILOT.md
-
-# Cursor 本地规则与索引（勿入库）
 .cursor/
-
-# DSH 项目级技能与本地配置（仅本机使用，不提交）
-# 锚定仓库根：不锚定会连带忽略未来子目录里的同名 .dsh 目录
+.vscode/
+.idea/
+.claude/
+.1code/
+.trae/
+.zcode/
+.gstack/
 /.dsh/
 
-# Editor
-.1code/
-.claude/
-.vscode/
-.mimocode/
-.workbuddy/
-*.swp
-*~
-
-# Config (local only)
-LocalConfig.json
-*.local.json
-
-Docs/*.md
-WebWallpaperDemo/
-# Temp / 一次性脚本：跑完即弃的调试、诊断、图标生成脚本不入库
-# 判据：全仓库零引用 + 产物已入库（或已被新实现取代）+ 硬编码本机路径这类一次性特征。
-# 产物入库、脚本本身归档到仓库外 WallHaven-pruned/（含 README.txt 清单与恢复方法）。
-tmp/
-
-# 本机测试：scripts/ 下 test- 开头的脚本和 Tests/ 只在本机跑，不入库；
-# CI / release workflow 与 package.sh 一律不调用（2026-11-05 定）。
-scripts/test-*.py
-/Tests/
-
-# Linux 壁纸引擎 CLI（macOS 项目无用，死文件）
-linux-wallpaperengine-cli
-*.tmp
-.gstack/
-
-# Landing page build output (CI generates these)
-Docs/assets/
-Docs/index.html
-landing/dist/
-landing/node_modules/
-
-# Trae
-.trae/
-# Zcode
-.zcode/
-.video_agent/
-# Wallpaper Engine：材质包不提交（构建时嵌入 CLI；本地保留或 CI 用 WAIFUX_WE_ASSETS_PACK_URL 拉取）
-Resources/assets/
-
-# Wallpaper Engine CLI (web wallpaper daemon)
-# wallpaperengine-cli.swift
-# Resources/wallpaperengine-cli
-
-# Embedded SteamKit2 service build output
-/build/SteamService/
-SteamService/bin/
-SteamService/obj/
-
-# Node（仅根级）— playwright 临时测试，不提交
-# 必须锚定根目录：未锚定的 package.json 会连带忽略 landing/package.json（Vite 项目源文件）
-node_modules/
-/package-lock.json
-/package.json
-
-# .NET shared framework：目录名 Microsoft.NETCore.App 以 .app 结尾，
-# 会被上方 `*.app` 规则误伤 → 整个 shared/ 不进 git，CI 产物缺 .NET 框架
-# （表现为生产包 Steam 服务「正在启动」后静默失败）。
-# 必须放在 *.app 之后；negation 重新包含目录与其全部内容。
-!SteamService/prebuilt/*/runtime/shared/
-!SteamService/prebuilt/*/runtime/shared/**
-# 仅排除构建产物目录，框架本身的 .o/.a 等中间文件属于运行时必需，一并保留
-
-# Sparkle appcast 的「固化 default item」片段：由发版 CI 生成并作为 release 资产分发
-# （后续发版从 release 资产读取），不提交进仓库。
-Docs/appcast-default-item.xml
-
-# 推送到手机工具链：两个 PyInstaller 单文件二进制**必须入库**（project.yml 把它们
-# 声明为主 target 的 resources，CI 的 checkout 里没有就会让 xcodegen spec 校验失败，
-# 即便放过也会让发出去的包缺手机推送功能）。源码脚本、中间产物、PyInstaller 工作目录
-# 仅在本地保留。
-Tools/MobilePush/*.py
-Tools/MobilePush/build/
-Tools/MobilePush/dist/
-Tools/MobilePush/*.spec
-Tools/MobilePush/__pycache__/
-
-# Versioned regression tests for the static Wallhaven fork.
+# Versioned regression sources; other local test scratch files stay private.
 !/Tests/
 /Tests/*
 !/Tests/WallhavenStaticCoreTests.swift
-
 !/Tests/WallhavenDownloadQueueTests.swift
-
 !/Tests/WallhavenCloudFileTests.swift
-
 !/Tests/WallhavenCloudIntegrationProbe.swift
-
-!scripts/test-wallhaven-helper-integration.py
-
 !/Tests/WallhavenMigrationIntegrationProbe.swift

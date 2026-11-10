@@ -1,74 +1,32 @@
-name: GitHub Pages
-
-# 与默认分支 main 对齐；文档/落地页变更时部署。
+name: Fork documentation
 on:
   push:
-    branches:
-      - main
-    paths:
-      - 'Docs/**'
-      - 'landing/**'
-      - '.github/workflows/pages.yml'
+    branches: [main]
+    paths: ['Docs/**', '.github/workflows/pages.yml']
   workflow_dispatch:
-
 permissions:
   contents: read
   pages: write
   id-token: write
-
 concurrency:
-  group: "pages"
+  group: pages
   cancel-in-progress: false
-
-env:
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
-
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
         with:
-          node-version: '24'
-
-      - name: Copy landing page to Docs
-        run: |
-          mkdir -p Docs
-          cp landing/index.html Docs/
-
-      # 仓库里的 Docs/appcast.xml 是本地 merge 钩子写的占位版（length=0、无 Sparkle 签名），
-      # 直接部署会让 Sparkle 拒绝更新。线上必须使用发版时生成的签名版 —— 它作为 release 资产存在，
-      # 优先从最新 release 取；取不到才退回仓库内容（例如尚未发过版）。
-      - name: Prefer signed appcast from latest release
-        run: |
-          if curl -fsSL "https://github.com/jipika/WaifuX/releases/latest/download/appcast.xml" -o Docs/appcast.xml; then
-            echo "✅ 使用最新 release 的签名 appcast"
-            grep -cE "edSignature=" Docs/appcast.xml | xargs echo "  带签名的 item 数:"
-          else
-            echo "⚠️ 未取得 release appcast，退回仓库内的占位版本"
-          fi
-          curl -fsSL "https://github.com/jipika/WaifuX/releases/latest/download/appcast-default-item.xml" \
-            -o Docs/appcast-default-item.xml || true
-
-      - name: Setup Pages
-        uses: actions/configure-pages@v4
-
-      - name: Upload artifact
-        uses: actions/upload-pages-artifact@v3
-        with:
-          path: 'Docs'
-
+          path: Docs
   deploy:
+    needs: build
+    runs-on: ubuntu-latest
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
-    runs-on: ubuntu-latest
-    needs: build
     steps:
-      - name: Deploy to GitHub Pages
+      - name: Deploy documentation
         id: deployment
         uses: actions/deploy-pages@v4
