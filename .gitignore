@@ -129,3 +129,8 @@ Tools/MobilePush/build/
 Tools/MobilePush/dist/
 Tools/MobilePush/*.spec
 Tools/MobilePush/__pycache__/
+
+# Versioned regression tests for the static Wallhaven fork.
+!/Tests/
+/Tests/*
+!/Tests/WallhavenStaticCoreTests.swift

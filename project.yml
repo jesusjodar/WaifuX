@@ -88,8 +88,6 @@ targets:
         buildPhase: resources
       - path: Tools/MobilePush/we-pair-server-x86_64
         buildPhase: resources
-      # Host preflight and extension rendering must use the same pixel budget.
-      - path: WaifuXWallpaperExtension/WallpaperSnapshotPixelBudget.swift
       # 根目录源文件（未被以上子目录覆盖）
       - path: WallpaperEngineEmbeddedAssets.swift
       - path: BackgroundAgent/BackgroundAgentWire.swift
@@ -366,7 +364,10 @@ targets:
     type: application
     platform: macOS
     sources:
-      - path: App/es.lproj/InfoPlist.strings
+      - path: App
+        excludes:
+          - Info.plist
+          - WaifuXApp.swift
       - path: Assets.xcassets
       # 设计壁纸/场景设计面板的编辑器 HTML：面板在 Helper 进程里弹（Bundle.main =
       # WaifuXHelper.app），不显式编进 Helper 资源就会落到 fallback 提示页。
@@ -409,6 +410,7 @@ targets:
       - path: Models/PixivModels.swift
       - path: Models/SchedulerConfig.swift
       - path: Models/WallhavenAPI.swift
+      - path: Models/WallhavenContentPolicy.swift
       - path: Models/Wallpaper.swift
       - path: Models/WallpaperOption.swift
       - path: Models/WorkshopWallpaper.swift
@@ -454,6 +456,7 @@ targets:
       - path: Services/LockScreenWallpaperService.swift
       - path: Services/AppGroupCacheBudget.swift
       - path: Services/MediaLibraryService.swift
+      - path: Services/WallpaperLibraryService.swift
       - path: Services/MediaService.swift
       - path: Services/MenuBarQuickSwitcherController.swift
       - path: Services/ModuleAvailability.swift
@@ -474,6 +477,7 @@ targets:
       - path: Services/ScreenSaverService.swift
       - path: Services/SleepPreventer.swift
       - path: Services/StaticImageWallpaperOverlayManager.swift
+      - path: Services/PortraitBlurFillWallpaperService.swift
       - path: Services/StaticWallpaperApplyService.swift
       - path: Services/StaticWallpaperGrainManager.swift
       - path: Services/StatusBarController.swift
@@ -521,13 +525,15 @@ targets:
       - path: Utilities/DeferredResourceCleanup.swift
       - path: Utilities/ExploreAtmosphere.swift
       - path: Utilities/FileIO.swift
+      - path: Utilities/LegacyRecordReader.swift
       - path: Utilities/FrameInterpolationLogger.swift
       - path: Utilities/GitHubHosts.swift
       - path: Utilities/NSScreen+Wallpaper.swift
+      - path: Utilities/NSWorkspace+StaticWallpaper.swift
       - path: Utilities/ProcessLiveness.swift
       - path: Utilities/WallpaperBoundedImageDecoder.swift
       - path: Utilities/LockScreenImagePublication.swift
-      - path: WaifuXWallpaperExtension/WallpaperSnapshotPixelBudget.swift
+      - path: Utilities/WallpaperSnapshotPixelBudget.swift
       - path: Utilities/VideoPreloader.swift
       - path: Utilities/WaifuXUIActions.swift
       - path: Utilities/WallpaperExtensionAgentHealer.swift
@@ -578,6 +584,7 @@ targets:
     platform: macOS
     sources:
       - path: WaifuXWallpaperExtension
+      - path: Utilities/WallpaperSnapshotPixelBudget.swift
       - path: Utilities/WallpaperBoundedImageDecoder.swift
     settings:
       base:

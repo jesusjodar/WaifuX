@@ -18,9 +18,7 @@ enum WallhavenBrowsePreferences {
 /// API Rate Limits: 45 requests per minute
 /// For more details, see: https://wallhaven.cc/help/api
 enum WallhavenAPI {
-    static var baseURL: String {
-        DataSourceProfileStore.activeProfile().wallpaper.apiBaseURL
-    }
+    static let baseURL = "https://wallhaven.cc/api/v1"
 
     struct ColorPreset: Identifiable, Hashable {
         let hex: String
@@ -55,24 +53,23 @@ enum WallhavenAPI {
     }
 
     static func url(for endpoint: Endpoint, apiKey: String? = nil) -> URL? {
-        let profile = DataSourceProfileStore.activeProfile().wallpaper
         switch endpoint {
         case .search(let parameters):
             return buildSearchURL(parameters: parameters, apiKey: apiKey)
         case .wallpaper(let id):
-            return makeURL(baseURL: profile.apiBaseURL, path: profile.wallpaperPath.replacingOccurrences(of: "{id}", with: id))
+            guard WallhavenContentPolicy.isWallpaperID(id) else { return nil }
+            return makeURL(baseURL: baseURL, path: "w/\(id)")
         }
     }
 
     static func authenticationHeaders(apiKey: String?) -> [String: String] {
-        let authHeaderName = DataSourceProfileStore.activeProfile().wallpaper.authHeaderName ?? "X-API-Key"
         guard let apiKey = normalizedAPIKey(apiKey) else {
             return ["Accept": "application/json"]
         }
 
         return [
             "Accept": "application/json",
-            authHeaderName: apiKey
+            "X-API-Key": apiKey
         ]
     }
 
@@ -120,8 +117,7 @@ enum WallhavenAPI {
     }
 
     private static func buildSearchURL(parameters: SearchParameters, apiKey: String? = nil) -> URL? {
-        let wallpaper = DataSourceProfileStore.activeProfile().wallpaper
-        guard let searchURL = makeURL(baseURL: wallpaper.apiBaseURL, path: wallpaper.searchPath) else {
+        guard let searchURL = makeURL(baseURL: baseURL, path: "search") else {
             return nil
         }
         var components = URLComponents(url: searchURL, resolvingAgainstBaseURL: false)
@@ -191,24 +187,10 @@ enum WallhavenAPI {
 
     /// 构建图片直链 URL
     static func imageURL(wallpaperId: String, ext: String = "jpg") -> URL? {
+        guard WallhavenContentPolicy.isWallpaperID(wallpaperId),
+              ["jpg", "jpeg", "png", "webp"].contains(ext.lowercased()) else { return nil }
         let prefix = String(wallpaperId.prefix(2))
-        let template = DataSourceProfileStore.activeProfile().wallpaper.imageURLTemplate
-            .replacingOccurrences(of: "{prefix}", with: prefix)
-            .replacingOccurrences(of: "{id}", with: wallpaperId)
-            .replacingOccurrences(of: "{ext}", with: ext)
-        return makeURL(baseURL: DataSourceProfileStore.activeProfile().wallpaper.apiBaseURL, path: template)
-    }
-
-    /// 构建缩略图 URL
-    static func thumbURL(from thumbs: Wallpaper.Thumbs, size: ThumbSize = .large) -> URL? {
-        switch size {
-        case .small:
-            return URL(string: thumbs.small)
-        case .original:
-            return URL(string: thumbs.original)
-        case .large:
-            return URL(string: thumbs.large)
-        }
+        return URL(string: "https://w.wallhaven.cc/full/\(prefix)/wallhaven-\(wallpaperId).\(ext.lowercased())")
     }
 
     enum ThumbSize {

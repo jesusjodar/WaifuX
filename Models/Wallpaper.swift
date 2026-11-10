@@ -632,3 +632,18 @@ struct WallpaperDownloadRecord: Identifiable, Codable, Hashable {
         isLooped = try container.decodeIfPresent(Bool.self, forKey: .isLooped)
     }
 }
+
+extension WallhavenAPI {
+    /// 构建缩略图 URL
+    static func thumbURL(from thumbs: Wallpaper.Thumbs, size: ThumbSize = .large) -> URL? {
+        switch size {
+        case .small:
+            return WallhavenContentPolicy.imageURL(thumbs.small)
+        case .original:
+            return WallhavenContentPolicy.imageURL(thumbs.original)
+        case .large:
+            return WallhavenContentPolicy.imageURL(thumbs.large)
+        }
+    }
+
+}
