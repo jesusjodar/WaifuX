@@ -1,10 +1,13 @@
 name: Static Wallhaven CI
 on:
   push:
-    branches: [main, feat/wallhaven-static-only]
+    branches: [main]
   pull_request:
     branches: [main]
   workflow_dispatch:
+concurrency:
+  group: static-ci-${{ github.head_ref || github.ref_name }}
+  cancel-in-progress: true
 permissions:
   contents: read
 jobs:
