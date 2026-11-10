@@ -171,7 +171,8 @@ private final class AgentConnectionListener: NSObject, NSXPCListenerDelegate {
     /// nil = 可信；否则返回拒绝原因（写进日志，下次导出能直接定案）。
     private func untrustedReason(_ connection: NSXPCConnection) -> String? {
         #if DEBUG
-        if BackgroundRuntimeRole.isIsolatedTest { return nil }
+        if BackgroundRuntimeRole.isIsolatedTest,
+           ProcessInfo.processInfo.environment["WAIFUX_HELPER_TEST_ENFORCE_HOST_IDENTITY"] != "1" { return nil }
         // Development builds can be unsigned. Still require the exact host executable.
         var path = [CChar](repeating: 0, count: 4096)
         guard proc_pidpath(connection.processIdentifier, &path, UInt32(path.count)) > 0 else {

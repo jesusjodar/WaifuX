@@ -14,7 +14,8 @@ import tempfile
 import uuid
 
 app = Path(sys.argv[1]).resolve()
-assert app.name == 'WaifuX.app' and 'Debug' in app.parts, 'A Debug development bundle is required'
+assert app.name == 'WaifuX.app'
+assert plistlib.loads((app / 'Contents/Info.plist').read_bytes()).get('WaifuXBuildConfiguration') == 'Debug', 'A Debug development bundle is required'
 helper = app / 'Contents/Helpers/WaifuXHelper.app/Contents/MacOS/WaifuXHelper'
 assert helper.is_file()
 service = 'com.waifux.test.helper.' + str(uuid.uuid4())
@@ -23,7 +24,8 @@ domain = f'gui/{os.getuid()}'
 with tempfile.TemporaryDirectory(prefix='waifux-static-ui-') as directory:
     root = Path(directory)
     env = os.environ | {'WAIFUX_HELPER_TEST_SERVICE': service, 'WAIFUX_HELPER_TEST_SUITE': suite,
-                       'WAIFUX_HELPER_TEST_ROOT': str(root), 'WAIFUX_UI_STATIC_PREVIEW': '1'}
+                       'WAIFUX_HELPER_TEST_ROOT': str(root), 'WAIFUX_UI_STATIC_PREVIEW': '1',
+                       'WAIFUX_HELPER_TEST_ENFORCE_HOST_IDENTITY': '1'}
     # Production service names and desktop opt-in must never leak into this mode.
     env.pop('WAIFUX_HELPER_TEST_ALLOW_DESKTOP_RENDERING', None)
     service_env = {k:v for k,v in env.items() if k.startswith('WAIFUX_')}
@@ -39,7 +41,7 @@ with tempfile.TemporaryDirectory(prefix='waifux-static-ui-') as directory:
     signal.signal(signal.SIGINT, interrupted)
     try:
         subprocess.run(['launchctl', 'bootstrap', domain, str(agent)], check=True)
-        print(f'ISOLATED_UI_SERVICE={service} ROOT={root}', flush=True)
+        print(f'ISOLATED_UI_SERVICE={service} ROOT={root} HOST_IDENTITY_ENFORCED=1', flush=True)
         child = subprocess.Popen([str(app / 'Contents/MacOS/WaifuX'), '--helper-ui-exit-probe'], env=env)
         result = child.wait()
         if result: raise RuntimeError(f'Preview exited with {result}; helper log: {(root / "helper.log").read_text()[-6000:]}')
